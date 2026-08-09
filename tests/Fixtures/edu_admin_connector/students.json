@@ -1,0 +1,52 @@
+{
+  "data": [
+    {
+      "id": 70,
+      "school_id": 10,
+      "class_id": 60,
+      "student_number": "LGLD-0001",
+      "first_name": "Desmond",
+      "last_name": "Ndzi",
+      "middle_name": null,
+      "date_of_birth": "2013-04-10",
+      "gender": "male",
+      "photo_path": null,
+      "photo_hash": null,
+      "biometric_identifier": "STU_NDZI_001",
+      "status": "active",
+      "parent_name": "Grace Ndzi",
+      "parent_phone": "+237677000010",
+      "parent_email": "grace.ndzi@example.com",
+      "emergency_contact_name": "Grace Ndzi",
+      "emergency_contact_phone": "+237677000010",
+      "device_sync_enabled": true,
+      "mobile_visible": true,
+      "updated_at": "2026-08-07T08:07:00Z"
+    },
+    {
+      "id": 71,
+      "school_id": 10,
+      "class_id": 60,
+      "student_number": "LGLD-0002",
+      "first_name": "Amina",
+      "last_name": "Tchoumi",
+      "middle_name": null,
+      "date_of_birth": "2012-11-02",
+      "gender": "female",
+      "photo_path": null,
+      "photo_hash": null,
+      "biometric_identifier": "STU_AMINA_002",
+      "status": "active",
+      "parent_name": "Paul Tchoumi",
+      "parent_phone": "+237677000011",
+      "parent_email": "paul.tchoumi@example.com",
+      "emergency_contact_name": "Paul Tchoumi",
+      "emergency_contact_phone": "+237677000011",
+      "device_sync_enabled": true,
+      "mobile_visible": true,
+      "updated_at": "2026-08-07T08:08:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "id": 60,
+      "school_id": 10,
+      "stream_id": 50,
+      "name": "A",
+      "full_name": "Form 1A",
+      "capacity": 45,
+      "current_enrollment": 2,
+      "class_teacher_name": "Mrs. Tchoumi",
+      "class_teacher_external_id": "900",
+      "status": "active",
+      "updated_at": "2026-08-07T08:06:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": 40,
+      "school_id": 10,
+      "section_id": 30,
+      "name": "Science",
+      "code": "SCI",
+      "sort_order": 1,
+      "status": "active",
+      "updated_at": "2026-08-07T08:04:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

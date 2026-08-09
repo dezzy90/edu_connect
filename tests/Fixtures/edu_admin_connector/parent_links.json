@@ -1,0 +1,52 @@
+{
+  "data": [
+    {
+      "id": 80,
+      "school_id": 10,
+      "student_id": 70,
+      "parent_phone": "+237677000010",
+      "linking_code": "ABC12345",
+      "relationship": "mother",
+      "relationship_description": null,
+      "is_primary_contact": true,
+      "can_pick_up": true,
+      "emergency_contact": true,
+      "communication_preferences": {
+        "push": true,
+        "sms": true,
+        "email": false,
+        "whatsapp": true
+      },
+      "status": "verified",
+      "requested_at": "2026-08-07T08:09:00Z",
+      "verified_at": "2026-08-07T08:10:00Z",
+      "linked_at": "2026-08-07T08:10:00Z",
+      "updated_at": "2026-08-07T08:10:00Z"
+    },
+    {
+      "id": 81,
+      "school_id": 10,
+      "student_id": 71,
+      "parent_phone": "+237677000011",
+      "linking_code": "DEF67890",
+      "relationship": "father",
+      "relationship_description": null,
+      "is_primary_contact": true,
+      "can_pick_up": true,
+      "emergency_contact": true,
+      "communication_preferences": {
+        "push": true,
+        "sms": true,
+        "email": true,
+        "whatsapp": false
+      },
+      "status": "verified",
+      "requested_at": "2026-08-07T08:11:00Z",
+      "verified_at": "2026-08-07T08:12:00Z",
+      "linked_at": "2026-08-07T08:12:00Z",
+      "updated_at": "2026-08-07T08:12:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

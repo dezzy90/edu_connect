@@ -1,0 +1,20 @@
+{
+  "complex": {
+    "id": 100,
+    "name": "Demo Education Complex",
+    "slug": "demo-education-complex",
+    "code": "DEMO",
+    "status": "active",
+    "updated_at": "2026-08-07T08:00:00Z"
+  },
+  "features": {
+    "attendance": true,
+    "messages": true,
+    "results": true,
+    "fees": true,
+    "timetable": true,
+    "discipline": true
+  },
+  "server_time": "2026-08-07T08:00:00Z",
+  "cursor": "fixture-start"
+}

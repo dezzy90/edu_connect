@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "id": 30,
+      "school_id": 10,
+      "name": "General Education",
+      "code": "GEN",
+      "sort_order": 1,
+      "status": "active",
+      "updated_at": "2026-08-07T08:03:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

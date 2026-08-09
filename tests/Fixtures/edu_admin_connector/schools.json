@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "id": 10,
+      "name": "Lycee General Leclerc Douala",
+      "slug": "lycee-general-leclerc-douala",
+      "code": "LGLD",
+      "type": "secondary",
+      "phone": "+237677000001",
+      "email": "admin@lgld.cm",
+      "address": "Douala, Littoral Region",
+      "city": "Douala",
+      "timezone": "Africa/Douala",
+      "status": "active",
+      "settings": {
+        "language": "fr"
+      },
+      "updated_at": "2026-08-07T08:01:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

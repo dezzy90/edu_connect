@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "id": 90,
+      "school_id": 10,
+      "academic_year_id": 20,
+      "sender_type": "admin",
+      "sender_name": "Academic Office",
+      "category": "general",
+      "priority": "normal",
+      "title": "Parent Orientation Reminder",
+      "body": "Parent orientation starts at 9:00 AM in the main hall.",
+      "audience_type": "parents",
+      "audience_filters": {},
+      "status": "published",
+      "published_at": "2026-08-07T08:13:00Z",
+      "expires_at": "2026-09-30T23:59:59Z",
+      "updated_at": "2026-08-07T08:13:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

@@ -1,0 +1,625 @@
+# Edu-connect V2 Implementation Progress
+
+This file tracks implementation progress for the Edu-connect redesign and Edu-admin integration work.
+
+## Current Milestone
+
+```text
+Edu-connect connects to Edu-admin, imports schools/classes/students/messages, exposes attendance and messages to mobile, and pushes attendance back to Edu-admin exactly once.
+```
+
+## 2026-08-07
+
+### Decisions Confirmed
+
+- Edu-connect v2 will be built beside the current Edu-connect v1/Rod-Connect implementation.
+- Physical v2 database tables will use the `ec_` prefix during transition so existing v1 tables are not broken.
+- V2 application code will live under explicit v2 namespaces such as `App\Models\V2` and `App\Http\Controllers\Api\V2`.
+- Edu-connect mobile and Edu-connect admin panel will call Edu-connect only.
+- Edu-admin integration will use connector APIs and mapping tables, not a shared database.
+
+### Started
+
+- Backend v2 foundation.
+- V2 schema planning.
+- V2 route group skeleton planning.
+- Integration mapping service planning.
+
+### Completed In This Slice
+
+- Added transition note to `EDU_CONNECT_INTEGRATION_ARCHITECTURE.md` explaining the `ec_` v2 table prefix.
+- Added v2 migrations:
+  - `2026_08_07_000001_create_ec_core_tables.php`
+  - `2026_08_07_000002_create_ec_academic_tables.php`
+  - `2026_08_07_000003_create_ec_people_tables.php`
+  - `2026_08_07_000004_create_ec_device_attendance_tables.php`
+  - `2026_08_07_000005_create_ec_mobile_realtime_tables.php`
+  - `2026_08_07_000006_create_ec_integration_tables.php`
+- Added first v2 models under `App\Models\V2`.
+- Added reusable v2 model concerns:
+  - `BelongsToTenant`
+  - `HasSourceIdentity`
+- Added configuration:
+  - `config/educonnect.php`
+  - `config/integrations.php`
+- Added `App\Services\Integration\MappingService`.
+- Added non-sensitive v2 route skeletons:
+  - `GET /api/admin/v2/foundation`
+  - `GET /api/mobile/v2/config`
+  - `GET /api/device/v2/config`
+  - `GET /api/integrations/v2/edu-admin/status`
+- Added the Edu-admin connector contract:
+  - `App\Contracts\EduAdminConnector`
+- Added fixture-backed connector infrastructure:
+  - `App\Services\Integration\Connectors\FixtureEduAdminConnector`
+  - `tests/Fixtures/edu_admin_connector/*.json`
+- Added additional v2 sync models:
+  - `AcademicYear`
+  - `Section`
+  - `EducationOption`
+  - `Stream`
+  - `IntegrationSyncRun`
+  - `IntegrationSyncItem`
+- Added `App\Services\Integration\SyncCoordinator` for the first Edu-admin initial-sync flow.
+- Added v2-only database test support:
+  - `Tests\Support\V2Schema`
+- Added focused v2 tests:
+  - `tests/Unit/V2/MappingServiceTest.php`
+  - `tests/Unit/V2/SyncCoordinatorTest.php`
+- Fixed the `MultiTenancyServiceProvider` helper guards so repeated Laravel test boots do not redeclare namespaced helper functions.
+- Added admin v2 API middleware:
+  - `App\Http\Middleware\EnsureAdminApiAccess`
+  - Middleware alias: `admin.api`
+- Added admin integration management controller:
+  - `App\Http\Controllers\Api\V2\Admin\IntegrationConnectionController`
+- Added protected admin v2 endpoints:
+  - `GET /api/admin/v2/integration-connections`
+  - `POST /api/admin/v2/integration-connections`
+  - `GET /api/admin/v2/integration-connections/{connection}`
+  - `PATCH /api/admin/v2/integration-connections/{connection}`
+  - `DELETE /api/admin/v2/integration-connections/{connection}`
+  - `POST /api/admin/v2/integration-connections/{connection}/sync-initial`
+  - `GET /api/admin/v2/integration-connections/{connection}/sync-runs`
+- Added `App\Services\Integration\EduAdminConnectorFactory`.
+- Added sync-run audit fields:
+  - `triggered_by_type`
+  - `triggered_by_id`
+  - `metadata`
+- Added connection sync rollups through `SyncCoordinator`:
+  - `last_successful_sync_at`
+  - `last_failed_sync_at`
+  - `last_error`
+- Added operator command:
+  - `php artisan educonnect:sync-initial {connection_id}`
+- Added admin integration API/command tests:
+  - `tests/Unit/V2/AdminIntegrationConnectionApiTest.php`
+- Added Edu-connect HTTP connector client:
+  - `App\Services\Integration\Connectors\HttpEduAdminConnector`
+- Updated `EduAdminConnectorFactory` so `EDU_ADMIN_CONNECTOR_DRIVER=http` selects the HTTP client.
+- Added Edu-connect HTTP connector tests:
+  - `tests/Unit/V2/HttpEduAdminConnectorTest.php`
+- Added Edu-admin connector API configuration:
+  - `config/educonnect.php`
+- Added Edu-admin connector bearer-token middleware:
+  - `App\Http\Middleware\EnsureEduConnectConnectorToken`
+  - Middleware alias: `educonnect.connector`
+- Added Edu-admin connector API controller:
+  - `App\Http\Controllers\Api\Integrations\EduConnectConnectorController`
+- Added Edu-admin connector endpoints:
+  - `GET /api/v1/integrations/edu-connect/bootstrap`
+  - `GET /api/v1/integrations/edu-connect/resources/{resource}`
+- Added Edu-admin connector API tests:
+  - `tests/Unit/Integrations/EduConnectConnectorApiTest.php`
+  - `tests/Support/ConnectorSchema.php`
+- Added Edu-admin attendance event ingestion:
+  - `POST /api/v1/integrations/edu-connect/attendance-events`
+  - Idempotent storage through `discipline_attendance_records.edu_connect_event_key`
+  - Complex/school/student/class graph validation
+  - Accepted, duplicate, and rejected event responses
+- Added Edu-admin attendance metadata fields to discipline attendance records:
+  - `edu_connect_event_key`
+  - `edu_connect_device_uid`
+  - `edu_connect_event_type`
+  - `edu_connect_event_time`
+  - `edu_connect_confidence_score`
+  - `edu_connect_raw_payload`
+- Added Edu-connect attendance push support to the connector contract:
+  - `App\Contracts\EduAdminConnector::pushAttendanceEvents`
+  - Fixture connector acceptance behavior
+  - HTTP connector `POST /api/v1/integrations/edu-connect/attendance-events`
+  - Stable batch `Idempotency-Key` header
+  - HMAC headers: `X-Edu-Connect-Timestamp` and `X-Edu-Connect-Signature`
+- Added Edu-admin signature verification for write requests:
+  - `App\Http\Middleware\EnsureEduConnectConnectorSignature`
+  - Middleware alias: `educonnect.connector.signed`
+  - Applied to `POST /api/v1/integrations/edu-connect/attendance-events`
+  - Rejects missing, invalid, or expired signatures
+- Added Edu-connect attendance outbox dispatcher:
+  - `App\Services\Integration\AttendanceOutboxDispatcher`
+  - Queues pending local attendance events into `ec_integration_outbox_events`
+  - Uses `integration_mappings` to translate local school/student/class IDs to Edu-admin IDs
+  - Marks attendance events as `queued`, `synced`, or `failed`
+  - Retries failed outbox items with configurable delay and attempt cap
+- Added operator command:
+  - `php artisan educonnect:push-attendance {connection_id}`
+- Added focused attendance push tests:
+  - `tests/Unit/V2/AttendanceOutboxDispatcherTest.php`
+- Added Edu-connect admin integration dashboard:
+  - `GET /admin/integrations`
+  - `POST /admin/integrations/{connection}/sync-initial`
+  - `POST /admin/integrations/{connection}/push-attendance`
+  - Connection status, mapping counts, recent sync runs, and outbox health
+  - Sidebar navigation entry for Integrations
+- Added admin web integration controller:
+  - `App\Http\Controllers\Admin\IntegrationController`
+  - Reuses `SyncCoordinator` and `AttendanceOutboxDispatcher`
+  - Scopes school admins to v2 tenants mapped from their legacy school
+- Added admin integration dashboard tests:
+  - `tests/Unit/V2/AdminIntegrationDashboardTest.php`
+- Added Edu-connect mobile parent API foundation:
+  - `POST /api/mobile/v2/auth/register`
+  - `POST /api/mobile/v2/auth/login`
+  - `POST /api/mobile/v2/auth/logout`
+  - `GET /api/mobile/v2/me`
+  - `PATCH /api/mobile/v2/me`
+  - `GET /api/mobile/v2/children`
+  - `POST /api/mobile/v2/children/link`
+  - `GET /api/mobile/v2/children/{student}`
+  - `GET /api/mobile/v2/children/{student}/attendance`
+  - `POST /api/mobile/v2/push-tokens`
+  - `DELETE /api/mobile/v2/push-tokens`
+- Added parent-only mobile API middleware:
+  - `App\Http\Middleware\EnsureMobileParentApiAccess`
+  - Middleware alias: `mobile.parent`
+  - Protected mobile routes require Sanctum plus an active `ec_parent_accounts` user
+- Updated `App\Models\V2\ParentAccount` to issue Sanctum API tokens.
+- Added secure child linking rules:
+  - A valid linking code is enough to link a child; the parent account phone no longer has to match the school contact phone.
+  - A child can have a maximum of two active parent accounts.
+  - Pending or verified links become active and attach to the authenticated parent.
+  - Linked-student reads return only active, mobile-visible students.
+- Added push-token registration/revocation for the future push worker layer.
+- Added focused mobile parent API tests:
+  - `tests/Unit/V2/MobileParentApiTest.php`
+- Added mobile notification and realtime API foundation:
+  - `GET /api/mobile/v2/notifications`
+  - `POST /api/mobile/v2/notifications/{notification}/read`
+  - `POST /api/mobile/v2/notifications/read-all`
+  - `GET /api/mobile/v2/notification-preferences`
+  - `PUT /api/mobile/v2/notification-preferences`
+  - `GET /api/mobile/v2/realtime/config`
+  - `POST /api/mobile/v2/realtime/auth`
+  - `POST /api/mobile/v2/realtime/heartbeat`
+- Added notification/realtime v2 models:
+  - `App\Models\V2\NotificationDelivery`
+  - `App\Models\V2\NotificationPreference`
+  - `App\Models\V2\RealtimeSubscription`
+- Added realtime authorization rules:
+  - Parent notification and children channels are parent-owned
+  - Student channels require an active parent-student link
+  - School-parent channels are derived only from linked students
+  - Auth response includes a Pusher-compatible signature when realtime key/secret config is present
+- Added first push notification worker layer:
+  - `App\Services\Notifications\PushNotificationDispatcher`
+  - `php artisan educonnect:dispatch-push-notifications`
+  - Current transport defaults to `log`, which creates provider delivery rows and marks them sent without external FCM/APNS calls
+- Added real push provider transports behind the dispatcher:
+  - `App\Services\Notifications\Push\PushTransportManager`
+  - `App\Services\Notifications\Push\LogPushTransport`
+  - `App\Services\Notifications\Push\FcmPushTransport`
+  - `App\Services\Notifications\Push\ApnsPushTransport`
+  - `2026_08_07_000009_add_provider_response_to_ec_notification_deliveries_table.php`
+  - `PUSH_TRANSPORT=provider` routes deliveries by each token's provider (`fcm` or `apns`).
+  - FCM uses HTTP v1 with either `FCM_ACCESS_TOKEN` or service-account credentials.
+  - APNS uses provider token auth with either `APNS_BEARER_TOKEN` or team/key/private-key credentials.
+  - Invalid provider tokens are revoked automatically; transient failures remain retryable with backoff.
+- Added focused realtime/notification tests:
+  - `tests/Unit/V2/MobileRealtimeNotificationApiTest.php`
+- Added mobile message inbox/read API:
+  - `GET /api/mobile/v2/messages`
+  - `GET /api/mobile/v2/messages/{message}`
+  - `POST /api/mobile/v2/messages/{message}/read`
+- Added official message expansion pipeline:
+  - `App\Models\V2\MobileMessage`
+  - `App\Models\V2\MobileMessageRecipient`
+  - `App\Services\Notifications\MobileMessagePublisher`
+  - `php artisan educonnect:publish-mobile-messages`
+  - Published mobile messages expand into parent recipients and companion mobile notifications
+- Added attendance notification hook:
+  - `App\Services\Notifications\AttendanceNotificationService`
+  - `AttendanceEvent::created` creates attendance notifications for active linked parents
+  - Respects parent notification preferences and privacy mode
+- Registered v2 content hooks in `App\Providers\AppServiceProvider`.
+- Added focused content pipeline tests:
+  - `tests/Unit/V2/MobileContentPipelineTest.php`
+- Added incremental Edu-admin pull sync:
+  - `App\Services\Integration\SyncCoordinator::runIncrementalSync`
+  - `php artisan educonnect:sync-incremental {connection_id}`
+  - Cursor and `updated_after` context stored on `ec_integration_sync_runs`
+  - Resource limiting for targeted runs such as `--resource=mobile_messages`
+- Added Edu-admin official message feed ingestion into Edu-connect:
+  - Edu-connect now imports the `mobile_messages` resource into `ec_mobile_messages`
+  - Edu-admin message audience filters are translated from external class/student IDs to local IDs
+  - Published imported messages reuse `MobileMessagePublisher` to create parent recipients and mobile notifications
+- Added admin triggers for incremental sync:
+  - `POST /api/admin/v2/integration-connections/{connection}/sync-incremental`
+  - `POST /admin/integrations/{connection}/sync-incremental`
+  - Admin integration dashboard now separates initial sync, update sync, and attendance push actions
+- Added Edu-admin connector support for official mobile messages:
+  - `GET /api/v1/integrations/edu-connect/resources/mobile_messages`
+  - `updated_after` filter for changed-record pulls
+  - Maps `communication_messages` to the Edu-connect mobile-message contract
+- Replaced the Edu-admin single env-token connector with persisted per-complex credentials:
+  - Edu-admin now stores connector bearer tokens as SHA-256 hashes only
+  - Edu-admin stores connector HMAC webhook secrets encrypted at rest
+  - Credentials are scoped to one `academic_complex`
+  - Credentials support scopes, expiry, rotation, revocation, and last-used tracking
+  - Edu-connect continues to store the issued access token and webhook secret encrypted on `ec_integration_connections`
+- Added Edu-admin credential operations:
+  - `GET /api/integrations/edu-connect/credentials`
+  - `POST /api/integrations/edu-connect/credentials`
+  - `POST /api/integrations/edu-connect/credentials/{credential}/rotate`
+  - `POST /api/integrations/edu-connect/credentials/{credential}/revoke`
+  - `php artisan educonnect:issue-credential {complex_id}`
+  - `php artisan educonnect:revoke-credential {credential_id}`
+- Added connector scope enforcement on Edu-admin:
+  - `foundation:read`
+  - `messages:read`
+  - `attendance:write`
+- Added Edu-connect scheduled queue jobs:
+  - `RunEduAdminIncrementalSyncJob`
+  - `PushEduAdminAttendanceOutboxJob`
+  - `PublishDueMobileMessagesJob`
+  - `DispatchMobilePushNotificationsJob`
+- Added scheduled-work dispatcher command:
+  - `php artisan educonnect:dispatch-scheduled-work`
+  - Supports `--only=sync`, `--only=attendance`, `--only=messages`, and `--only=push`
+  - Dispatches only active `connected` Edu-admin integration connections
+- Added Laravel scheduler entries:
+  - Incremental sync every 5 minutes by default
+  - Attendance outbox push every minute by default
+  - Mobile message publishing every minute by default
+  - Push notification dispatch every minute by default
+- Added scheduler configuration under `config/integrations.php`.
+- Added super-admin credential controls to the Edu-connect admin integration dashboard:
+  - `POST /admin/integrations` creates a connected Edu-admin integration for a tenant.
+  - `PATCH /admin/integrations/{connection}/credentials` updates URL, remote ID, status, scopes, access token, and webhook secret.
+  - The dashboard shows token and webhook-secret presence without exposing encrypted or plaintext secrets.
+  - `connector:*` is available but not selected by default.
+  - Active connections require a base URL, access token, and webhook secret.
+  - School admins remain blocked from credential mutations.
+- Added integration audit events:
+  - `ec_integration_audit_events`
+  - `App\Models\V2\IntegrationAuditEvent`
+  - `App\Services\Integration\IntegrationAuditLogger`
+- Wired audit logging for:
+  - Sync completion and failure.
+  - Official mobile-message ingestion during sync.
+  - Attendance outbox enqueue, dispatch, partial failure, and connector failure.
+  - Dashboard credential create, update, and clear actions.
+- Added admin dashboard drill-down payloads and UI:
+  - `recentAuditEvents`
+  - `recentSyncItems`
+  - Audit Trail card
+  - Sync Items card
+- Added redaction safeguards so audit metadata stores counters, changed fields, and credential action flags without plaintext access tokens or webhook secrets.
+- Added Edu-admin connector credential audit events:
+  - `edu_connect_connector_audit_events`
+  - `App\Models\EduConnectConnectorAuditEvent`
+  - `App\Services\EduConnectConnectorAuditLogger`
+- Wired Edu-admin credential audit logging for:
+  - API credential issue, rotate, and revoke actions with actor metadata.
+  - CLI credential issue and revoke commands with `source=cli`.
+  - Redacted credential snapshots, changed fields, and action flags without plaintext tokens or webhook secrets.
+- Added controlled conversation APIs:
+  - Direct parent-to-administration threads for active linked students.
+  - System-managed class group chats for parents of the same class plus school administrators.
+  - System-managed school channels/forums for general school information.
+  - Child-code linking, conversation listing, and realtime config automatically ensure the parent has the group for each linked child's class and the channel for each linked child's school.
+  - Parents with children in multiple schools see only the schools, classes, and conversation spaces attached to their active linked children.
+- Added conversation backend support:
+  - `2026_08_07_000008_add_class_context_to_ec_conversation_threads_table.php`
+  - `App\Models\V2\ConversationThread`
+  - `App\Models\V2\ConversationParticipant`
+  - `App\Models\V2\ConversationMessage`
+  - `App\Models\V2\ConversationMessageReceipt`
+  - `App\Services\Conversations\ConversationService`
+- Added mobile conversation routes:
+  - `GET /api/mobile/v2/conversations`
+  - `POST /api/mobile/v2/conversations/direct`
+  - `GET /api/mobile/v2/conversations/{thread}`
+  - `POST /api/mobile/v2/conversations/{thread}/messages`
+  - `POST /api/mobile/v2/conversations/{thread}/read`
+- Added admin conversation routes:
+  - `GET /api/admin/v2/conversations`
+  - `GET /api/admin/v2/conversations/{thread}`
+  - `POST /api/admin/v2/conversations/{thread}/messages`
+  - `POST /api/admin/v2/conversations/{thread}/read`
+  - `PATCH /api/admin/v2/conversations/{thread}/status`
+- Extended realtime channel authorization:
+  - Class parent channels are derived from active linked children.
+  - School parent/channel subscriptions are derived from active linked children.
+  - Conversation channels are exposed only for direct, class group, or school channel threads visible to the authenticated parent.
+- Added backend realtime broadcast events:
+  - `mobile.notification.created`
+  - `mobile.notifications.changed`
+  - `mobile.message.published`
+  - `mobile.message.read`
+  - `mobile.child.linked`
+  - `mobile.attendance.recorded`
+  - `mobile.conversation.message.created`
+  - `mobile.conversation.thread.changed`
+- Added `App\Events\V2\MobileRealtimeEvent` as the common private-channel broadcast envelope.
+- Added `App\Services\Realtime\MobileRealtimeBroadcaster` as the single backend domain broadcaster for mobile realtime events.
+- Wired realtime emissions into notification creation/read changes, official mobile-message publication/read changes, child linking, attendance capture, conversation message creation, and conversation status changes.
+- Added `config/broadcasting.php` plus `.env.example` realtime/Pusher/Reverb-compatible configuration.
+- Added realtime event contract documentation:
+  - `EDU_CONNECT_REALTIME_EVENT_CONTRACT.md`
+- Preserved the privacy boundary for attendance: parent/student attendance events broadcast only to parent-owned and parent-school channels, never to school-wide parent channels or class-wide group channels.
+- Added Edu-connect admin web conversation console:
+  - `GET /admin/conversations`
+  - `GET /admin/conversations/list`
+  - `GET /admin/conversations/{thread}`
+  - `POST /admin/conversations/{thread}/messages`
+  - `POST /admin/conversations/{thread}/read`
+  - `PATCH /admin/conversations/{thread}/status`
+  - `POST /admin/conversations/realtime/auth`
+- Added admin conversation realtime channels:
+  - `private-school.{schoolId}.admins.conversations`
+  - Visible `private-conversation.{threadId}` channels are also authorized for the admin panel.
+- Added `pusher-js` to the admin frontend so the web panel can subscribe to Reverb/Pusher-compatible private channels.
+- The admin conversation console supports thread search, type/status filters, unread counters, live message append, message dedupe, replies, mark-read, and status changes.
+- Added the Conversations sidebar entry for admin users.
+
+### Verification
+
+- PHP syntax checks passed for all new and modified PHP files in this slice.
+- `php artisan route:list --path=v2` registered all four v2 skeleton routes.
+- Clean isolated sqlite migration verification passed for all six v2 migration files.
+- `php artisan test tests\Unit\ExampleTest.php` passed.
+- `php artisan test tests\Unit\V2\MappingServiceTest.php tests\Unit\V2\SyncCoordinatorTest.php` passed with 2 tests and 27 assertions.
+- `php artisan test tests\Unit\V2\AdminIntegrationConnectionApiTest.php` passed with 4 tests and 27 assertions.
+- `php artisan route:list --path=admin/v2` registered the admin foundation route plus 7 protected integration routes.
+- `php artisan list educonnect` registered `educonnect:sync-initial`.
+- `php artisan route:list --path=v2` registered 11 v2 routes.
+- `php artisan test tests\Unit\V2` passed with 6 tests and 54 assertions.
+- `php artisan test tests\Unit\V2` passed with 9 tests and 63 assertions after adding the HTTP connector.
+- Edu-connect `php artisan test tests\Unit` passed with 14 tests and 105 assertions.
+- Edu-admin `php artisan route:list --path=v1/integrations/edu-connect` registered connector bootstrap, resource, and attendance-events routes.
+- Edu-admin `php artisan test tests\Unit` passed with 7 tests and 57 assertions.
+- Edu-admin `php artisan test tests\Unit\Integrations\EduConnectConnectorApiTest.php` passed with 6 tests and 56 assertions after adding HMAC signature checks.
+- Edu-connect `php artisan test tests\Unit\V2\AttendanceOutboxDispatcherTest.php` passed with 3 tests and 37 assertions.
+- Edu-connect `php artisan test tests\Unit\V2\HttpEduAdminConnectorTest.php` passed with 4 tests and 13 assertions after adding signed write requests.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 13 tests and 104 assertions.
+- Edu-connect `php artisan list educonnect` registered `educonnect:sync-initial` and `educonnect:push-attendance`.
+- Edu-connect `php artisan test tests\Unit\V2\AdminIntegrationDashboardTest.php` passed with 2 tests and 27 assertions.
+- Edu-connect `npm run types` passed after adding the admin integration dashboard.
+- Edu-connect `php artisan route:list --path=admin/integrations` registered the integration dashboard and action routes.
+- Edu-connect `php artisan test tests\Unit` passed with 16 tests and 132 assertions after adding the admin integration dashboard.
+- Edu-connect `npm run build` passed and generated the production frontend bundle.
+- Local smoke check: `GET /admin/integrations` on `http://127.0.0.1:8001` returned `302` to `/admin/login` when unauthenticated.
+- Local dev asset check: when `public/hot` exists, Laravel loads React assets from Vite. `npm run dev` must be running on port `5173`; `GET /@vite/client` now returns `200` on both `http://localhost:5173` and `http://[::1]:5173`.
+- Edu-connect `php artisan route:list --path=mobile/v2` registered 12 mobile v2 routes.
+- Edu-connect `php artisan test tests\Unit\V2\MobileParentApiTest.php` passed with 4 tests and 36 assertions.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 19 tests and 167 assertions after adding the mobile parent API.
+- Edu-connect `php artisan test tests\Unit` passed with 20 tests and 168 assertions after adding the mobile parent API.
+- Edu-connect `php artisan wayfinder:generate --with-form` refreshed generated route/action metadata for the new mobile v2 routes.
+- Edu-connect `npm run types` passed after refreshing Wayfinder metadata.
+- Edu-connect `npm run build` passed after refreshing Wayfinder metadata.
+- Edu-connect `php artisan route:list --path=mobile/v2` registered 20 mobile v2 routes after adding notifications and realtime.
+- Edu-connect `php artisan list educonnect` registered `educonnect:dispatch-push-notifications`.
+- Edu-connect `php artisan test tests\Unit\V2\MobileRealtimeNotificationApiTest.php` passed with 4 tests and 40 assertions.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 23 tests and 207 assertions after adding notification/realtime APIs.
+- Edu-connect `php artisan test tests\Unit` passed with 24 tests and 208 assertions after adding notification/realtime APIs.
+- Edu-connect `php artisan wayfinder:generate --with-form` refreshed generated route/action metadata after adding notification/realtime routes.
+- Edu-connect `npm run types` passed after adding notification/realtime APIs.
+- Edu-connect `npm run build` passed after adding notification/realtime APIs.
+- Edu-connect `php artisan route:list --path=mobile/v2` registered 23 mobile v2 routes after adding the message inbox.
+- Edu-connect `php artisan list educonnect` registered `educonnect:publish-mobile-messages`.
+- Edu-connect `php artisan test tests\Unit\V2\MobileContentPipelineTest.php` passed with 4 tests and 30 assertions.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 27 tests and 237 assertions after adding the content pipeline.
+- Edu-connect `php artisan test tests\Unit` passed with 28 tests and 238 assertions after adding the content pipeline.
+- Edu-connect `php artisan wayfinder:generate --with-form` refreshed generated route/action metadata after adding message routes.
+- Edu-connect `npm run types` passed after adding the content pipeline.
+- Edu-connect `npm run build` passed after adding the content pipeline.
+- Edu-connect `php artisan test tests\Unit\V2\SyncCoordinatorTest.php` passed with 2 tests and 39 assertions after adding incremental message sync.
+- Edu-connect `php artisan test tests\Unit\V2\HttpEduAdminConnectorTest.php` passed with 4 tests and 13 assertions after adding resource filters.
+- Edu-connect `php artisan test tests\Unit\V2\AdminIntegrationConnectionApiTest.php` passed with 5 tests and 40 assertions after adding the incremental admin API/CLI path.
+- Edu-connect `php artisan test tests\Unit\V2\AttendanceOutboxDispatcherTest.php` passed with 3 tests and 37 assertions after updating the connector contract signature.
+- Edu-admin `php artisan test tests\Unit\Integrations\EduConnectConnectorApiTest.php` passed with 6 tests and 63 assertions after adding `mobile_messages`.
+- Edu-connect `php artisan test tests\Unit\V2\AdminIntegrationDashboardTest.php` passed with 3 tests and 30 assertions after adding the dashboard incremental action.
+- Edu-connect `php artisan route:list --path=admin/v2` registered 9 admin v2 routes including `sync-incremental`.
+- Edu-connect `php artisan route:list --path=admin/integrations` registered 4 admin integration web routes including `sync-incremental`.
+- Edu-connect `php artisan list educonnect` registered `educonnect:sync-incremental` alongside sync, attendance, message, and push commands.
+- Edu-connect `php artisan wayfinder:generate --with-form` refreshed generated route/action metadata after adding admin incremental routes.
+- Edu-connect `php artisan test tests\Unit` passed with 31 tests and 270 assertions.
+- Edu-admin `php artisan test tests\Unit` passed with 7 tests and 64 assertions.
+- Edu-connect `npm run types` passed after refreshing route metadata.
+- Edu-connect `npm run build` passed after adding the admin incremental action.
+- Local dev check: Laravel responded on `http://127.0.0.1:8001/admin/integrations`, Vite responded on `http://127.0.0.1:5173/@vite/client`, and the browser smoke check reached `/admin/login` without `ERR_CONNECTION_REFUSED` asset errors.
+- Edu-admin `php artisan test tests\Unit\Integrations\EduConnectConnectorApiTest.php` passed with 8 tests and 95 assertions after adding persisted connector credentials.
+- Edu-admin `php artisan route:list --path=integrations/edu-connect` registered 7 connector and credential routes.
+- Edu-admin `php artisan list educonnect` registered `educonnect:issue-credential` and `educonnect:revoke-credential`.
+- Edu-admin `php artisan migrate --pretend --path=database\migrations\2026_08_07_000002_create_edu_connect_connector_credentials_table.php` produced the expected credential-table SQL.
+- Edu-admin `php artisan test tests\Unit` passed with 9 tests and 96 assertions after adding persisted connector credentials.
+- Edu-connect `php artisan test tests\Unit` passed with 31 tests and 270 assertions after syncing the credential architecture documentation.
+- Edu-connect `php artisan test tests\Unit\V2\ScheduledWorkTest.php` passed with 2 tests and 13 assertions after adding scheduler/queue jobs.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 32 tests and 282 assertions after adding scheduler/queue jobs.
+- Edu-connect `php artisan test tests\Unit` passed with 33 tests and 283 assertions after adding scheduler/queue jobs.
+- Edu-connect `php artisan list educonnect` registered `educonnect:dispatch-scheduled-work`.
+- Edu-connect `php artisan schedule:list` registered incremental sync, attendance push, message publishing, and push dispatch schedules.
+- Edu-connect `php artisan test tests\Unit\V2\AdminIntegrationDashboardTest.php` passed with 6 tests and 75 assertions after adding credential dashboard controls.
+- Edu-connect `php artisan route:list --path=admin/integrations` registered 6 integration dashboard routes including create and credential update.
+- Edu-connect `npm run types` passed after adding credential dashboard controls.
+- Edu-connect `npm run build` passed after adding credential dashboard controls.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 35 tests and 327 assertions after adding credential dashboard controls.
+- Edu-connect `php artisan test tests\Unit` passed with 36 tests and 328 assertions after adding credential dashboard controls.
+- Local smoke check: Laravel responded on `http://127.0.0.1:8001`, `/admin/integrations` returned an unauthenticated redirect, `public/hot` points to `http://127.0.0.1:5173`, and Vite responded on `/@vite/client`.
+- Edu-connect `php artisan migrate --pretend --path=database\migrations\2026_08_07_000007_create_ec_integration_audit_events_table.php` produced the expected audit-table SQL.
+- Edu-connect `php artisan test tests\Unit\V2\SyncCoordinatorTest.php` passed with 2 tests and 45 assertions after adding sync/message audit events.
+- Edu-connect `php artisan test tests\Unit\V2\AttendanceOutboxDispatcherTest.php` passed with 3 tests and 41 assertions after adding outbox audit events.
+- Edu-connect `php artisan test tests\Unit\V2\AdminIntegrationDashboardTest.php` passed with 6 tests and 96 assertions after adding audit drill-downs and credential audit checks.
+- Edu-connect `npm run types` passed after adding audit drill-down UI.
+- Edu-connect `npm run build` passed after adding audit drill-down UI.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 35 tests and 358 assertions after adding audit logging and drill-downs.
+- Edu-connect `php artisan test tests\Unit` passed with 36 tests and 359 assertions after adding audit logging and drill-downs.
+- Edu-admin `php artisan migrate --pretend --path=database\migrations\2026_08_07_000003_create_edu_connect_connector_audit_events_table.php` produced the expected audit-table SQL.
+- Edu-admin `php artisan test tests\Unit\Integrations\EduConnectConnectorApiTest.php` passed with 9 tests and 132 assertions after adding connector credential audit events.
+- Edu-admin `php artisan test tests\Unit` passed with 10 tests and 133 assertions after adding connector credential audit events.
+- Edu-admin `php artisan route:list --path=integrations/edu-connect` registered 7 connector and credential routes after adding audit logging.
+- Edu-admin `php artisan list educonnect` registered `educonnect:issue-credential` and `educonnect:revoke-credential` after adding CLI audit logging.
+- Local smoke check: Edu-connect `/admin/integrations` returned `302` to `/admin/login`, `public/hot` points to `http://127.0.0.1:5173`, Vite returned `200` for `/@vite/client`, and Laravel `/up` returned `200`.
+- Edu-connect `php artisan migrate --pretend --path=database\migrations\2026_08_07_000008_add_class_context_to_ec_conversation_threads_table.php` produced the expected class-context conversation SQL.
+- Edu-connect `php artisan route:list --path=mobile/v2/conversations` registered 5 mobile conversation routes.
+- Edu-connect `php artisan route:list --path=admin/v2/conversations` registered 5 admin conversation routes after removing manual class-group and school-channel creation.
+- Edu-connect `php artisan test tests\Unit\V2\MobileConversationApiTest.php` passed with 4 tests and 58 assertions after changing class groups and school channels to automatic system-managed spaces.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 39 tests and 416 assertions after changing class groups and school channels to automatic system-managed spaces.
+- Edu-connect `php artisan wayfinder:generate --with-form` refreshed generated route/action metadata after removing manual admin creation routes.
+- Edu-connect `npm run types` passed after refreshing conversation route metadata.
+- Edu-connect `npm run build` passed after refreshing conversation route metadata.
+- Edu-connect `php artisan test tests\Unit` passed with 40 tests and 417 assertions after changing class groups and school channels to automatic system-managed spaces.
+- Local smoke check: Edu-connect `/admin/integrations` returned `302` to `/admin/login`, `public/hot` points to `http://127.0.0.1:5173`, Vite returned `200` for `/@vite/client`, and Laravel `/up` returned `200` after the automatic conversation update.
+- Edu-connect `php artisan test tests\Unit\V2\PushNotificationTransportTest.php` passed with 4 tests and 54 assertions after adding FCM/APNS transports, invalid-token revocation, and retry backoff.
+- Edu-connect `php artisan test tests\Unit\V2\MobileRealtimeNotificationApiTest.php` passed with 4 tests and 40 assertions after replacing the placeholder dispatcher branch.
+- Edu-connect `php artisan migrate --pretend --path=database\migrations\2026_08_07_000009_add_provider_response_to_ec_notification_deliveries_table.php` produced the expected delivery diagnostics and retry SQL.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 43 tests and 470 assertions after adding FCM/APNS transports.
+- Edu-connect `php artisan test tests\Unit` passed with 44 tests and 471 assertions after adding FCM/APNS transports.
+- Edu-connect `php artisan list educonnect` registered sync, attendance push, mobile message publishing, scheduled work, and mobile push dispatch commands.
+- Edu-connect `php artisan schedule:list` registered sync, attendance, message, and push scheduled jobs.
+- Edu-connect `npm run types` passed after adding push transport config.
+- Edu-connect `npm run build` passed after adding push transport config.
+- Local smoke check: Edu-connect `/admin/integrations` returned `302` to `/admin/login`, `public/hot` points to `http://127.0.0.1:5173`, Vite returned `200` for `/@vite/client`, and Laravel `/up` returned `200` after adding FCM/APNS transports.
+- PHP syntax checks passed for the backend realtime event slice.
+- Edu-connect `php artisan test tests\Unit\V2\MobileRealtimeBroadcastTest.php` passed with 5 tests and 7 assertions after adding backend broadcast events.
+- Edu-connect `php artisan test tests\Unit\V2\MobileRealtimeBroadcastTest.php tests\Unit\V2\MobileConversationApiTest.php tests\Unit\V2\MobileContentPipelineTest.php tests\Unit\V2\MobileRealtimeNotificationApiTest.php` passed with 17 tests and 135 assertions after formatting the realtime event slice.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 48 tests and 477 assertions after finalizing the backend realtime broadcast event contract.
+- Edu-connect `php artisan test tests\Unit\V2\AdminConversationWebTest.php tests\Unit\V2\MobileRealtimeBroadcastTest.php` passed with 8 tests and 42 assertions after adding the admin conversation web panel and admin realtime channel.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 51 tests and 512 assertions after adding admin web realtime conversations.
+- Edu-connect `php artisan route:list --path=admin/conversations` registered 7 admin conversation web routes.
+- Edu-connect `npm run types` passed after adding the admin conversation web panel.
+- Edu-connect `npm run build` passed after adding the admin conversation web panel and `pusher-js`.
+- Edu-connect `npm audit --omit=dev` initially reported frontend dependency advisories after installing the realtime client; `npm audit fix` updated the dependency tree, and the follow-up `npm audit --omit=dev` reported 0 vulnerabilities.
+- Edu-connect `npm run types` and `npm run build` passed after the npm audit fix.
+- Browser smoke check: `http://127.0.0.1:8001/admin/conversations` redirected to `/admin/login` when unauthenticated, with Laravel and Vite both responding and no browser console errors.
+- Edu-connect duplicate pending admin migration `2025_09_27_031219_create_admin_users_table.php` is now a no-op because the table is owned by the earlier create and column-add migrations.
+- Edu-connect live `php artisan migrate` successfully applied pending v2 migrations `2026_08_07_000005` through `2026_08_07_000009` after removing empty partial realtime tables left by the failed MySQL index-name attempt.
+- Edu-connect `php artisan migrate:status` shows every v2 migration as ran, with no pending v2 migrations.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 51 tests and 512 assertions after the live migration cleanup.
+- Edu-connect local FCM provider mode is configured with `PUSH_PROVIDER=fcm`, `PUSH_TRANSPORT=provider`, `FCM_PROJECT_ID=n3rod-4fb80`, and a local service-account JSON path outside the repo.
+- Edu-connect `php artisan config:clear` refreshed runtime config, and a config check confirmed the FCM credential path exists without exposing the private key.
+- Edu-connect `php artisan test tests\Unit\V2\PushNotificationTransportTest.php` passed with 4 tests and 54 assertions after enabling the local FCM provider configuration.
+- Edu-connect backend now exposes standalone admin-panel APIs: `POST /api/admin/v2/auth/login`, `GET /api/admin/v2/auth/me`, `POST /api/admin/v2/auth/logout`, and `GET /api/admin/v2/dashboard`.
+- Edu-connect backend CORS config now reads `CORS_ALLOWED_ORIGINS`, with production examples allowing `https://rod.ghvcameroon.com` to call `https://rod-api.ghvcameroon.com`.
+- Edu-connect standalone React/Vite admin frontend has been created in `frontend/`, matching the Edu-admin split deployment pattern.
+- Standalone frontend pages implemented: login, dashboard, Edu-admin integrations, conversations, organization, notifications, and settings.
+- Edu-connect `php artisan test tests\Unit\V2\AdminAuthApiTest.php tests\Unit\V2\AdminDashboardApiTest.php` passed with 3 tests and 25 assertions after adding the token auth and dashboard APIs.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 54 tests and 537 assertions after adding standalone admin APIs.
+- Edu-connect standalone frontend `npm run lint` passed.
+- Edu-connect standalone frontend `npm run build` passed and generated `frontend/dist/index.html` plus compiled static assets without `public/hot` or Vite dev-server references.
+- Edu-connect standalone frontend `npm audit --omit=dev` reported 0 production dependency vulnerabilities.
+- Edu-connect standalone deployment packages created under `C:\Users\NTech\production-packages\20260808-112502-educonnect-standalone-admin`: `rod-api-standalone-admin-hotfix-20260808-112502.zip` and `rod-frontend-standalone-20260808-112502.zip`.
+- Edu-connect Sanctum token storage migration `2026_08_08_000010_create_personal_access_tokens_table.php` was added and applied after the standalone admin login exposed the missing `personal_access_tokens` table in the real MySQL database.
+- Local standalone admin login smoke test passed against `http://127.0.0.1:8001/api/admin/v2/auth/login` with `super@rodconnect.com`, returning HTTP 200 and a bearer token without exposing the token value.
+- Edu-connect `php artisan test --filter=AdminAuthApiTest` passed with 2 tests and 12 assertions after adding the Sanctum token-table migration.
+- Edu-connect integration linking now creates the tenant automatically from Edu-admin bootstrap when a super admin creates a connected Edu-admin connection without selecting an existing tenant.
+- Edu-connect standalone frontend integration form now defaults to "Create from Edu-admin complex" and no longer requires a tenant before linking.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 55 tests and 547 assertions after adding automatic tenant creation for complex linking.
+- Edu-connect standalone frontend `npm run build` passed after updating the integration linking form.
+- Edu-connect integration sync and auto-link bootstrap failures now return readable 422 JSON errors instead of leaking generic 500 server errors from connector exceptions.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 56 tests and 550 assertions after adding the readable sync-error path.
+- Edu-connect widened `ec_integration_connections.webhook_secret` from `VARCHAR(255)` to `TEXT` because encrypted webhook secrets can exceed 255 characters even when the raw secret is short.
+- Edu-connect API validation now allows webhook secrets up to 4096 characters, matching the older admin integration controller.
+- Edu-connect `php artisan migrate --force` applied `2026_08_08_000011_widen_ec_integration_connection_webhook_secret` locally.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 56 tests and 550 assertions after the webhook-secret storage fix.
+- Edu-connect parent mobile linking is now code-only:
+  - `POST /api/mobile/v2/children/link` searches by `linking_code`, not by `parent_phone`.
+  - The same child code can link up to two parent accounts.
+  - A third parent receives a validation error and cannot read the child.
+  - The link table no longer treats `parent_phone + student_id` as the identity; `student_id + parent_account_id` prevents duplicate parent-child account links.
+  - Edu-admin sync preserves already active mobile links instead of downgrading them back to pending/verified during incremental pulls.
+- Edu-connect mobile linking now accepts QR payloads and resilient manual entry:
+  - Raw codes, lowercase codes, formatted codes with separators, and `educonnect://link?code=...&student_number=...` QR payloads resolve to the same normalized lookup.
+  - QR payloads can carry `student_number`, so parents do not need to type a second value when a school-issued code could be ambiguous.
+  - The Flutter child-link sheet has a user-initiated QR scanner using the camera only for this flow.
+- Edu-connect production mobile config was verified at `https://rod-api.ghvcameroon.com/api/mobile/v2/config`, returning HTTP 200 in standalone mode.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 56 tests and 556 assertions after the code-only parent link update.
+- Edu-connect migration preview for `2026_08_08_000012_relax_parent_link_phone_uniqueness.php` produced the expected parent-link index changes.
+- Edu-connect `php artisan migrate --force` applied `2026_08_08_000012_relax_parent_link_phone_uniqueness.php` locally.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 57 tests and 560 assertions after adding QR payload parsing for mobile child linking.
+- Edu-connect Flutter `flutter analyze lib\ui\screens\children_screen.dart` passed after adding QR scan support.
+- Edu-connect Flutter `flutter build apk --debug --no-pub` passed and generated `build\app\outputs\flutter-apk\app-debug.apk` after pinning `mobile_scanner` to `6.0.10` for the current Android Gradle Plugin 8.6.0 toolchain.
+- Edu-connect mobile student availability now treats both `active` and Edu-admin-synced `enrolled` students as mobile-visible statuses. This fixes the parent-link error "This student is not available in the mobile app" when the code is valid but the synced student still has Edu-admin's `enrolled` status.
+- Edu-connect availability checks were aligned across child linking, child detail authorization, realtime channel authorization, attendance notifications, and official mobile message targeting.
+- Edu-connect Flutter child-link sheet now has an explicit `Scan QR code` button above the manual code field, so parents do not need to discover the smaller field icon.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 58 tests and 566 assertions after the enrolled-status mobile availability fix.
+- Edu-connect Flutter `flutter analyze lib\ui\screens\children_screen.dart` and `flutter build apk --debug --no-pub` passed after making the scan button more visible.
+- Edu-connect mobile child linking now treats conversation and realtime setup as post-link side effects. If automatic class group/school channel creation or realtime broadcast fails because production migrations/config are incomplete, the child link still returns success and logs a warning instead of surfacing a generic server error to the parent.
+- Edu-connect conversation visibility filters now also use the shared mobile-visible student statuses (`active`, `enrolled`) so linked Edu-admin students remain visible in chats and parent context.
+- Edu-connect `php artisan test tests\Unit\V2\MobileParentApiTest.php` passed with 7 tests and 57 assertions after adding a regression test for post-link conversation setup failure.
+- Edu-connect `php artisan test tests\Unit\V2` passed with 59 tests and 571 assertions after hardening mobile child linking against post-link side-effect failures.
+- Edu-connect Flutter parent app now has a more complete production-facing experience:
+  - One-time push notification consent prompt after sign-in, with FCM auto-init still gated by user choice.
+  - Runtime/debug wording removed from the parent Profile surface.
+  - Encrypted local cache restore for parent profile, children, notifications, messages, conversations, preferences, attendance, and conversation details.
+  - Home dashboard now shows linked children, school count, unread counts, and today's latest check-in/check-out state per child.
+  - Child detail view now has Overview, Attendance, Academics, Fees, and Conduct tabs; attendance supports date/month filtering while the other modules are ready for the next Edu-admin feeds.
+  - Connect now uses swipeable Chats, Groups, and Channels tabs with WhatsApp-style conversation rows.
+  - Class groups now display school context for parents with children in the same class name across different schools.
+  - School administration direct chats are grouped by linked school.
+  - Conversation screens now show outgoing messages immediately and refresh periodically while open.
+  - QR child-link scanning is exposed through an explicit button and field icon.
+- Edu-admin mobile-message export now excludes staff-only audiences so parent feeds receive only parent-safe message types.
+- Edu-admin now exports parent-safe child profile snapshots as `student_mobile_profiles`:
+  - Fee status, totals, installments, and payment summaries.
+  - Published academic/report-card summaries.
+  - Class timetable entries.
+  - Roll-call, absence summary, and discipline incidents.
+- Edu-connect stores synced child profile snapshots in `ec_student_mobile_profiles`.
+- Edu-connect sync imports the new `student_mobile_profiles` resource during initial/incremental syncs.
+- Edu-connect mobile exposes `GET /api/mobile/v2/children/{student}/profile`.
+- The mobile endpoint returns a stable standalone profile shape when no Edu-admin profile has been synced.
+- Edu-connect Flutter child detail now renders live/cached child profile data instead of placeholder module cards.
+- Edu-connect Flutter `flutter analyze --no-pub` completed with only old mock-era `lib/pages/*` informational lint debt; active redesigned app files had no analyzer errors or warnings.
+- Edu-connect Flutter `flutter build apk --debug --no-pub` passed and generated `build\app\outputs\flutter-apk\app-debug.apk`.
+- Edu-admin `php artisan test tests\Unit\Integrations\EduConnectConnectorApiTest.php` passed with 9 tests and 140 assertions after adding the parent-safe mobile-message and child-profile export regressions.
+- Edu-connect `php artisan test tests\Unit\V2\MobileParentApiTest.php tests\Unit\V2\SyncCoordinatorTest.php tests\Unit\V2\AdminIntegrationConnectionApiTest.php` passed with 16 tests and 165 assertions after adding child-profile sync and mobile API coverage.
+- Edu-connect Flutter `flutter analyze --no-pub lib\app lib\core lib\models lib\services lib\state lib\theme lib\ui` passed with no issues after the child-detail profile wiring.
+- Edu-connect Flutter `flutter build apk --debug --no-pub` passed and generated `build\app\outputs\flutter-apk\app-debug.apk` after the child-detail profile wiring.
+- Edu-connect parent mobile-message delivery now rejects staff/internal categories at the model/API/publisher level so parent inboxes do not show staff-only notices even if bad imported data creates a recipient row.
+- Edu-connect direct parent-to-administration conversations now support named school desks:
+  - `general`
+  - `principal`
+  - `class_teacher`
+  - `accounts`
+  - `discipline`
+  - Different desks create distinct direct threads for the same linked child.
+- Edu-connect mobile realtime config now reports disabled unless private-channel key, secret, and host are configured, preventing a false connected-but-unsubscribed state.
+- Edu-connect Flutter Connect now opens a per-school administration desk screen and passes the selected desk to `/api/mobile/v2/conversations/direct`.
+- Edu-connect Flutter open conversation screens subscribe to matching realtime events and refresh immediately, with the existing polling fallback retained for production hosts without working WebSockets.
+- Edu-connect Flutter Profile no longer exposes runtime/realtime diagnostics to parents; phone alerts use parent-facing copy without Firebase build jargon.
+- Edu-connect Flutter QR scan flow now accepts raw codes, URI payloads, and JSON payloads, and shows a visible camera-error fallback panel when scanning cannot start.
+- Edu-connect `php artisan test tests\Unit\V2\MobileContentPipelineTest.php tests\Unit\V2\MobileConversationApiTest.php tests\Unit\V2\MobileRealtimeNotificationApiTest.php` passed with 14 tests and 146 assertions after the parent-safe message, named desk, and realtime config hardening.
+- Edu-connect `php artisan test tests\Unit\V2\MobileRealtimeBroadcastTest.php` passed with 5 tests and 7 assertions after the realtime follow-up.
+- Edu-connect Flutter `flutter analyze --no-pub lib\app lib\core lib\models lib\services lib\state lib\theme lib\ui` passed with no issues after the Connect/Profile/QR/realtime follow-up.
+- Edu-connect Flutter `flutter build apk --debug --no-pub` passed and generated `build\app\outputs\flutter-apk\app-debug.apk` after the Connect/Profile/QR/realtime follow-up.
+
+### Next Implementation Tasks
+
+1. Add full v2 CRUD APIs and standalone pages for local schools, devices, students, and admin users.
+2. Add conversation moderation tools: report message, mute participant, close stale threads, and school-admin review queues.
+3. Add admin-side routing/review for named direct desks so school staff can triage Principal, Accounts, Discipline, Class teacher, and General office conversations.
+4. Add production monitoring around realtime disconnects, push provider failures, invalid-token volume, and queue lag.
+5. Configure and smoke-test production Reverb/Pusher credentials; mobile now has polling fallback, but true socket realtime still needs a working production socket endpoint.
+6. Add secure downloadable report-card documents and deeper module APIs for fee receipts, detailed marks, and timetable changes.
+7. Retire or redirect old Laravel/Inertia admin web routes after standalone frontend feature parity.
+
+### Notes
+
+- The current app already has v1 tables named `schools`, `students`, `biometric_devices`, and others.
+- The `ec_` prefix is a transition mechanism. After the v2 cutover, we can either keep the prefix for clarity or rename tables after archiving v1.
+- The current git root appears to be `C:\Users\NTech`, so `edu-connect` is shown as an untracked directory from that parent repository.
+- Live v2 migrations have been applied on the local Edu-connect database; future schema work can proceed through normal `php artisan migrate` runs.
+- The Edu-admin HTTP connector is implemented and covered with HTTP fake tests, but a live two-server end-to-end run has not been performed yet.
+- Mobile auth currently uses password-backed Sanctum tokens as a bootstrap contract for the Flutter redesign. OTP request/verification remains planned once the preferred SMS or WhatsApp provider is finalized.
+- Mobile push dispatch is configured locally for FCM provider delivery. Keep service-account JSON files outside source control, and use environment variables for production credentials.
+- The standalone web admin now uses bearer tokens, so `rod.ghvcameroon.com` can be deployed as static files while `rod-api.ghvcameroon.com` remains the Laravel backend/API.

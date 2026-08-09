@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": 20,
+      "school_id": 10,
+      "name": "2026-2027",
+      "start_date": "2026-09-01",
+      "end_date": "2027-06-30",
+      "is_current": true,
+      "status": "active",
+      "updated_at": "2026-08-07T08:02:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

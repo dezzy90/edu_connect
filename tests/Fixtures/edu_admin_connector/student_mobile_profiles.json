@@ -1,0 +1,84 @@
+{
+  "data": [
+    {
+      "id": 70,
+      "student_id": 70,
+      "school_id": 10,
+      "class_id": 60,
+      "academic_year_id": 20,
+      "academic_year_name": "2026-2027",
+      "term_number": 1,
+      "generated_at": "2026-08-07T08:15:00Z",
+      "updated_at": "2026-08-07T08:15:00Z",
+      "fees": {
+        "currency": "XAF",
+        "status": "partial",
+        "total_due": 150000,
+        "total_paid": 90000,
+        "balance": 60000,
+        "installments": [
+          {
+            "name": "First installment",
+            "amount": 50000,
+            "paid": 50000,
+            "balance": 0,
+            "status": "paid"
+          }
+        ],
+        "payments": [
+          {
+            "receipt_number": "RCPT-001",
+            "amount": 90000,
+            "currency": "XAF",
+            "paid_at": "2026-08-07T08:15:00Z"
+          }
+        ]
+      },
+      "academics": {
+        "current_average": 14.5,
+        "class_position": 4,
+        "total_students": 37,
+        "subjects": [
+          {
+            "name": "Mathematics",
+            "average": 15,
+            "coefficient": 4
+          }
+        ]
+      },
+      "report_cards": [
+        {
+          "id": "secondary-8",
+          "title": "Term 1 report card",
+          "average": 14.5,
+          "preview": {
+            "available": true
+          }
+        }
+      ],
+      "timetable": [
+        {
+          "day_name": "Monday",
+          "period_label": "P1",
+          "subject": "Mathematics",
+          "teacher": "Grace Teacher"
+        }
+      ],
+      "discipline": {
+        "today": {
+          "date": "2026-08-07",
+          "status": "present"
+        },
+        "month_summary": {
+          "present": 12,
+          "late": 1,
+          "absent": 0
+        },
+        "recent_attendance": [],
+        "incidents": []
+      }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

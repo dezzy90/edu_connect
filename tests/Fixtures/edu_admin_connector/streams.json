@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": 50,
+      "school_id": 10,
+      "section_id": 30,
+      "education_option_id": 40,
+      "name": "Form 1",
+      "display_name": "Form 1",
+      "grade_level": 1,
+      "sort_order": 1,
+      "status": "active",
+      "updated_at": "2026-08-07T08:05:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}
