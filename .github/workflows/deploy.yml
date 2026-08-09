@@ -1,0 +1,156 @@
+name: Deploy edu-connect
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: edu-connect-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy to cPanel
+    runs-on: ubuntu-latest
+
+    env:
+      CPANEL_HOST: 192.185.48.217
+      CPANEL_PORT: 2222
+      CPANEL_USER: ghvcamer
+      BACKEND_DIR: /home4/ghvcamer/public_html/website_9d3cb424
+      FRONTEND_DIR: /home4/ghvcamer/public_html/website_7e98303a
+      PHP_BIN: /opt/cpanel/ea-php82/root/usr/bin/php
+      FRONTEND_API_URL: https://rod-api.ghvcameroon.com/api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+
+      - name: Install backend dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          npm --prefix frontend ci
+          VITE_API_URL="$FRONTEND_API_URL" npm --prefix frontend run build
+
+      - name: Configure SSH
+        env:
+          CPANEL_SSH_KEY_B64: ${{ secrets.CPANEL_SSH_KEY_B64 }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          if [ -z "$CPANEL_SSH_KEY_B64" ]; then
+            echo "CPANEL_SSH_KEY_B64 is empty or missing."
+            exit 1
+          fi
+          echo "CPANEL_SSH_KEY_B64 length: ${#CPANEL_SSH_KEY_B64}"
+          printf '%s' "$CPANEL_SSH_KEY_B64" | tr -d '\r\n ' | base64 -d > "$HOME/.ssh/cpanel_key"
+          chmod 600 "$HOME/.ssh/cpanel_key"
+          ssh-keygen -y -f "$HOME/.ssh/cpanel_key" > "$HOME/.ssh/cpanel_key.pub"
+          ssh-keyscan -p "$CPANEL_PORT" "$CPANEL_HOST" >> "$HOME/.ssh/known_hosts"
+          echo "SSH_TARGET=$CPANEL_USER@$CPANEL_HOST" >> "$GITHUB_ENV"
+          echo "SSH_OPTS=-F /dev/null -i $HOME/.ssh/cpanel_key -p $CPANEL_PORT -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PreferredAuthentications=publickey -o ConnectTimeout=30 -o ConnectionAttempts=5" >> "$GITHUB_ENV"
+
+      - name: Prepare remote folders
+        run: |
+          retry() {
+            for attempt in 1 2 3 4 5; do
+              "$@" && return 0
+              status=$?
+              echo "Attempt $attempt failed with exit code $status. Retrying..."
+              sleep $((attempt * 15))
+            done
+            return $status
+          }
+
+          retry ssh $SSH_OPTS "$SSH_TARGET" "mkdir -p '$BACKEND_DIR' '$FRONTEND_DIR' '$BACKEND_DIR/bootstrap/cache' '$BACKEND_DIR/storage/framework/cache/data' '$BACKEND_DIR/storage/framework/sessions' '$BACKEND_DIR/storage/framework/views' '$BACKEND_DIR/storage/logs'"
+
+      - name: Deploy backend runtime
+        run: |
+          retry() {
+            for attempt in 1 2 3 4 5; do
+              "$@" && return 0
+              status=$?
+              echo "Attempt $attempt failed with exit code $status. Retrying..."
+              sleep $((attempt * 15))
+            done
+            return $status
+          }
+
+          retry rsync -az --delete \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='deploy/' \
+            --exclude='deployment/' \
+            --exclude='docs/' \
+            --exclude='frontend/' \
+            --exclude='node_modules/' \
+            --exclude='public/build/' \
+            --exclude='public/storage/' \
+            --exclude='storage/' \
+            --exclude='tests/' \
+            --exclude='tmp/' \
+            --exclude='*.md' \
+            --exclude='*.zip' \
+            -e "ssh $SSH_OPTS" ./ "$SSH_TARGET:$BACKEND_DIR/"
+
+      - name: Install cPanel backend entry files
+        run: |
+          retry() {
+            for attempt in 1 2 3 4 5; do
+              "$@" && return 0
+              status=$?
+              echo "Attempt $attempt failed with exit code $status. Retrying..."
+              sleep $((attempt * 15))
+            done
+            return $status
+          }
+
+          retry rsync -az -e "ssh $SSH_OPTS" deployment/cpanel/backend-direct-index.php "$SSH_TARGET:$BACKEND_DIR/index.php"
+          retry rsync -az -e "ssh $SSH_OPTS" deployment/cpanel/backend-direct.htaccess "$SSH_TARGET:$BACKEND_DIR/.htaccess"
+
+      - name: Deploy frontend dist
+        run: |
+          retry() {
+            for attempt in 1 2 3 4 5; do
+              "$@" && return 0
+              status=$?
+              echo "Attempt $attempt failed with exit code $status. Retrying..."
+              sleep $((attempt * 15))
+            done
+            return $status
+          }
+
+          retry rsync -az --delete -e "ssh $SSH_OPTS" frontend/dist/ "$SSH_TARGET:$FRONTEND_DIR/"
+          retry rsync -az -e "ssh $SSH_OPTS" deployment/cpanel/frontend.htaccess "$SSH_TARGET:$FRONTEND_DIR/.htaccess"
+
+      - name: Finalize Laravel
+        run: |
+          retry() {
+            for attempt in 1 2 3 4 5; do
+              "$@" && return 0
+              status=$?
+              echo "Attempt $attempt failed with exit code $status. Retrying..."
+              sleep $((attempt * 15))
+            done
+            return $status
+          }
+
+          retry ssh $SSH_OPTS "$SSH_TARGET" "cd '$BACKEND_DIR' && chmod -R u+rwX bootstrap/cache storage && '$PHP_BIN' artisan optimize:clear && '$PHP_BIN' artisan migrate --force && '$PHP_BIN' artisan optimize"
