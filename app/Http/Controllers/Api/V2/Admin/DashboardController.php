@@ -18,6 +18,7 @@ use App\Models\V2\ParentAccount;
 use App\Models\V2\School;
 use App\Models\V2\Student;
 use App\Models\V2\Tenant;
+use App\Services\Realtime\RealtimeConfigurationHealth;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -25,7 +26,7 @@ use Illuminate\Support\Collection;
 
 class DashboardController extends Controller
 {
-    public function __invoke(Request $request): JsonResponse
+    public function __invoke(Request $request, RealtimeConfigurationHealth $realtimeHealth): JsonResponse
     {
         /** @var AdminUser $admin */
         $admin = $request->user();
@@ -36,7 +37,7 @@ class DashboardController extends Controller
             'status' => 'success',
             'data' => [
                 'summary' => $this->summary($tenantIds, $schoolIds),
-                'health' => $this->health($tenantIds, $schoolIds),
+                'health' => $this->health($tenantIds, $schoolIds, $realtimeHealth),
                 'organization' => [
                     'tenants' => $this->tenants($tenantIds),
                     'schools' => $this->schools($schoolIds),
@@ -68,12 +69,13 @@ class DashboardController extends Controller
         ];
     }
 
-    private function health(?Collection $tenantIds, ?Collection $schoolIds): array
+    private function health(?Collection $tenantIds, ?Collection $schoolIds, RealtimeConfigurationHealth $realtimeHealth): array
     {
         return [
             'mode' => config('educonnect.mode'),
             'api_version' => config('educonnect.api_version'),
             'realtime_enabled' => (bool) config('educonnect.realtime.enabled'),
+            'realtime' => $realtimeHealth->snapshot(),
             'push_provider' => config('educonnect.notifications.push_provider'),
             'active_connections' => $this->connectionQuery($tenantIds)->where('status', 'active')->count(),
             'failed_sync_runs' => $this->syncRunQuery($tenantIds)->where('status', 'failed')->count(),

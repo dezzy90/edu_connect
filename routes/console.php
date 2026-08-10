@@ -12,11 +12,53 @@ use App\Services\Integration\EduAdminConnectorFactory;
 use App\Services\Integration\SyncCoordinator;
 use App\Services\Notifications\MobileMessagePublisher;
 use App\Services\Notifications\PushNotificationDispatcher;
+use App\Services\Realtime\RealtimeConfigurationHealth;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+Artisan::command('educonnect:realtime-check {--json : Output machine-readable JSON}', function (
+    RealtimeConfigurationHealth $realtimeHealth
+) {
+    $health = $realtimeHealth->snapshot();
+
+    if ($this->option('json')) {
+        $this->line(json_encode($health, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        return $health['enabled'] && ! $health['ready'] ? 1 : 0;
+    }
+
+    $this->line('EduConnect realtime status: ' . $health['status']);
+    $this->line('Driver: ' . $health['driver']);
+    $this->line('Broadcast connection: ' . $health['broadcast_connection']);
+    $this->line('Websocket URL: ' . ($health['websocket_url'] ?? 'not ready'));
+
+    foreach ($health['problems'] as $problem) {
+        $this->error($problem);
+    }
+
+    foreach ($health['warnings'] as $warning) {
+        $this->warn($warning);
+    }
+
+    if (! $health['enabled']) {
+        $this->warn('Realtime is disabled. Set REALTIME_ENABLED=true when the provider is ready.');
+
+        return 0;
+    }
+
+    if (! $health['ready']) {
+        $this->error('Realtime is enabled but not ready.');
+
+        return 1;
+    }
+
+    $this->info('Realtime is ready for mobile websocket connections.');
+
+    return 0;
+})->purpose('Validate EduConnect mobile realtime broadcast and websocket configuration');
 
 Artisan::command('educonnect:sync-initial {connection_id : The ec_integration_connections ID} {--driver= : Connector driver to use} {--fixture-path= : Fixture path for local verification}', function (
     EduAdminConnectorFactory $connectors,

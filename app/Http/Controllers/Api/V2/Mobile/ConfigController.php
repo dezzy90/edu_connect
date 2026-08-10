@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Api\V2\Mobile;
 
 use App\Http\Controllers\Controller;
+use App\Services\Realtime\RealtimeConfigurationHealth;
 use Illuminate\Http\JsonResponse;
 
 class ConfigController extends Controller
 {
-    public function __invoke(): JsonResponse
+    public function __invoke(RealtimeConfigurationHealth $realtimeHealth): JsonResponse
     {
+        $realtime = $realtimeHealth->snapshot();
+
         return response()->json([
             'status' => 'success',
             'data' => [
@@ -22,8 +25,10 @@ class ConfigController extends Controller
                     'privacy_mode' => config('educonnect.notifications.privacy_mode'),
                 ],
                 'realtime' => [
-                    'enabled' => config('educonnect.realtime.enabled'),
-                    'driver' => config('educonnect.realtime.driver'),
+                    'enabled' => $realtime['enabled'],
+                    'ready' => $realtime['ready'],
+                    'status' => $realtime['status'],
+                    'driver' => $realtime['driver'],
                 ],
             ],
         ]);

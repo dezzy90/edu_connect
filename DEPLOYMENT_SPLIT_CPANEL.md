@@ -69,9 +69,19 @@ CORS_ALLOWED_ORIGINS=https://rod.ghvcameroon.com,https://rod-api.ghvcameroon.com
 PUSHER_APP_ID=YOUR_REALTIME_APP_ID
 PUSHER_APP_KEY=YOUR_REALTIME_APP_KEY
 PUSHER_APP_SECRET=YOUR_REALTIME_APP_SECRET
+PUSHER_HOST=api-mt1.pusher.com
+PUSHER_PORT=443
+PUSHER_SCHEME=https
+REALTIME_ENABLED=true
+REALTIME_DRIVER=pusher
+REALTIME_HOST=ws-mt1.pusher.com
+REALTIME_PORT=443
+REALTIME_SCHEME=https
 
 FCM_CREDENTIALS_PATH=/home/CPANEL_USER/secure/firebase/n3rod-4fb80-firebase-adminsdk.json
 ```
+
+See `REALTIME_PRODUCTION_SETUP.md` for provider-specific realtime notes and the cPanel cron entries needed for smooth message/push delivery.
 
 Place the Firebase service-account JSON outside public web roots, for example:
 
@@ -89,6 +99,7 @@ php artisan key:generate --force
 php artisan migrate --force
 php artisan storage:link
 php artisan optimize:clear
+php artisan educonnect:realtime-check
 php artisan optimize
 ```
 

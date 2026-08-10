@@ -1,5 +1,6 @@
 <?php
 
+use App\Events\V2\MobileRealtimeEvent;
 use App\Models\AdminUser;
 use App\Models\V2\AcademicClass;
 use App\Models\V2\ConversationMessage;
@@ -14,6 +15,7 @@ use App\Models\V2\Stream;
 use App\Models\V2\Student;
 use App\Models\V2\Tenant;
 use App\Services\Conversations\ConversationService;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Tests\Support\V2Schema;
 
@@ -23,10 +25,19 @@ beforeEach(function (): void {
     V2Schema::migrate();
 
     config([
+        'broadcasting.default' => 'pusher',
+        'broadcasting.connections.pusher.app_id' => 'local-app-id',
+        'broadcasting.connections.pusher.key' => 'local-key',
+        'broadcasting.connections.pusher.secret' => 'local-secret',
         'educonnect.realtime.enabled' => true,
         'educonnect.realtime.app_key' => 'local-key',
         'educonnect.realtime.app_secret' => 'local-secret',
+        'educonnect.realtime.host' => '127.0.0.1',
+        'educonnect.realtime.port' => 8080,
+        'educonnect.realtime.scheme' => 'http',
     ]);
+
+    Event::fake([MobileRealtimeEvent::class]);
 });
 
 it('automatically exposes class groups and school channels after child links', function (): void {

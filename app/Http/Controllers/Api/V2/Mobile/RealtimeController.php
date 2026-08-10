@@ -10,28 +10,27 @@ use App\Models\V2\ParentStudentLink;
 use App\Models\V2\RealtimeSubscription;
 use App\Models\V2\Student;
 use App\Services\Conversations\ConversationService;
+use App\Services\Realtime\RealtimeConfigurationHealth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 
 class RealtimeController extends Controller
 {
-    public function config(Request $request): JsonResponse
+    public function config(Request $request, RealtimeConfigurationHealth $realtimeHealth): JsonResponse
     {
         $parent = $this->parent($request);
+        $health = $realtimeHealth->snapshot();
         $appKey = config('educonnect.realtime.app_key');
-        $appSecret = config('educonnect.realtime.app_secret');
         $host = config('educonnect.realtime.host');
-        $enabled = (bool) config('educonnect.realtime.enabled')
-            && filled($appKey)
-            && filled($appSecret)
-            && filled($host);
+        $enabled = (bool) $health['ready'];
 
         return response()->json([
             'status' => 'success',
             'data' => [
                 'enabled' => $enabled,
                 'driver' => config('educonnect.realtime.driver'),
+                'status' => $health['status'],
                 'auth_endpoint' => '/api/mobile/v2/realtime/auth',
                 'heartbeat_endpoint' => '/api/mobile/v2/realtime/heartbeat',
                 'channels' => $enabled ? $this->allowedChannels($parent)->values() : [],

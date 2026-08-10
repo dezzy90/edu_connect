@@ -68,6 +68,25 @@ export type DashboardPayload = {
     mode: string;
     api_version: string;
     realtime_enabled: boolean;
+    realtime?: {
+      enabled: boolean;
+      ready: boolean;
+      status: string;
+      driver: string;
+      broadcast_connection: string;
+      app_id_present: boolean;
+      broadcast_key_present: boolean;
+      broadcast_secret_present: boolean;
+      app_key_present: boolean;
+      app_secret_present: boolean;
+      cluster: string;
+      host: string;
+      port: number;
+      scheme: string;
+      websocket_url: string | null;
+      problems: string[];
+      warnings: string[];
+    };
     push_provider: string | null;
     active_connections: number;
     failed_sync_runs: number;

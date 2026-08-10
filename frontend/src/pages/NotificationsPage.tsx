@@ -18,6 +18,9 @@ export default function NotificationsPage() {
   }
 
   const dashboard = dashboardQuery.data;
+  const realtime = dashboard?.health.realtime;
+  const realtimeReady = realtime?.ready ?? dashboard?.health.realtime_enabled ?? false;
+  const realtimeStatus = realtime?.status ?? (dashboard?.health.realtime_enabled ? 'enabled' : 'disabled');
 
   return (
     <div className="page-stack">
@@ -31,8 +34,25 @@ export default function NotificationsPage() {
 
       <section className="metrics-grid narrow">
         <MetricTile icon={Bell} label="Queued pushes" value={dashboard?.summary.notifications_queued ?? 0} helper={dashboard?.health.push_provider ?? 'provider pending'} />
-        <MetricTile icon={Radio} label="Realtime" value={dashboard?.health.realtime_enabled ? 1 : 0} helper={dashboard?.health.realtime_enabled ? 'enabled' : 'disabled'} />
+        <MetricTile icon={Radio} label="Realtime" value={realtimeReady ? 1 : 0} helper={realtimeStatus} />
       </section>
+
+      {realtime && (realtime.problems.length > 0 || realtime.warnings.length > 0) && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Realtime Readiness</h2>
+              <p>{realtime.host || 'No websocket host configured'} - {realtime.broadcast_connection}</p>
+            </div>
+            <StatusBadge status={realtime.status} />
+          </div>
+          <div className="health-notes">
+            {[...realtime.problems, ...realtime.warnings].map((item) => (
+              <p key={item}>{item}</p>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="panel">
         <div className="panel-header">

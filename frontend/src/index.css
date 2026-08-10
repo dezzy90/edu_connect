@@ -622,6 +622,30 @@ a {
   color: var(--ink);
 }
 
+.health-notes {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.health-notes p {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.health-notes svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
 .muted-line {
   margin: 16px 0 0;
   font-size: 0.88rem;

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
+  AlertTriangle,
   Bell,
   Cable,
   CheckCircle2,
@@ -32,6 +33,9 @@ export default function DashboardPage() {
   }
 
   const { summary, health, recent } = dashboardQuery.data;
+  const realtime = health.realtime;
+  const realtimeReady = realtime?.ready ?? health.realtime_enabled;
+  const realtimeStatus = realtime?.status ?? (health.realtime_enabled ? 'enabled' : 'disabled');
 
   const metrics = [
     { label: 'Schools', value: summary.schools, icon: School, helper: `${formatNumber(summary.tenants)} tenants` },
@@ -41,6 +45,7 @@ export default function DashboardPage() {
     { label: 'Attendance Today', value: summary.attendance_today, icon: CheckCircle2, helper: 'events received' },
     { label: 'Open Chats', value: summary.open_conversations, icon: MessageCircle, helper: 'groups, channels, direct' },
     { label: 'Queued Pushes', value: summary.notifications_queued, icon: Bell, helper: health.push_provider ?? 'provider pending' },
+    { label: 'Realtime', value: realtimeReady ? 1 : 0, icon: Cable, helper: realtimeStatus },
     { label: 'Active Integrations', value: health.active_connections, icon: Cable, helper: `${formatNumber(health.pending_outbox)} outbox pending` },
   ];
 
@@ -71,12 +76,20 @@ export default function DashboardPage() {
               <h2>System Health</h2>
               <p>Backend readiness for mobile and web clients.</p>
             </div>
-            <StatusBadge status={health.failed_sync_runs || health.failed_outbox ? 'attention' : 'active'} />
+            <StatusBadge status={health.failed_sync_runs || health.failed_outbox || (realtime?.enabled && !realtime.ready) ? 'attention' : 'active'} />
           </div>
           <div className="health-grid">
             <div>
               <span>Realtime</span>
-              <strong>{health.realtime_enabled ? 'Enabled' : 'Disabled'}</strong>
+              <strong>{titleCase(realtimeStatus)}</strong>
+            </div>
+            <div>
+              <span>Realtime host</span>
+              <strong>{realtime?.host || 'Not configured'}</strong>
+            </div>
+            <div>
+              <span>Broadcast</span>
+              <strong>{realtime?.broadcast_connection ?? 'Unknown'}</strong>
             </div>
             <div>
               <span>Push provider</span>
@@ -91,6 +104,16 @@ export default function DashboardPage() {
               <strong>{formatNumber(health.failed_outbox)}</strong>
             </div>
           </div>
+          {realtime && (realtime.problems.length > 0 || realtime.warnings.length > 0) && (
+            <div className="health-notes">
+              {[...realtime.problems, ...realtime.warnings].map((item) => (
+                <p key={item}>
+                  <AlertTriangle size={14} />
+                  <span>{item}</span>
+                </p>
+              ))}
+            </div>
+          )}
           <p className="muted-line">Server time: {formatDate(health.server_time)}</p>
         </div>
 

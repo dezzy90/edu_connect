@@ -1,5 +1,6 @@
 <?php
 
+use App\Events\V2\MobileRealtimeEvent;
 use App\Models\V2\AcademicClass;
 use App\Models\V2\MobileNotification;
 use App\Models\V2\MobilePushToken;
@@ -13,6 +14,7 @@ use App\Models\V2\Stream;
 use App\Models\V2\Student;
 use App\Models\V2\Tenant;
 use App\Services\Notifications\PushNotificationDispatcher;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Tests\Support\V2Schema;
 
@@ -22,12 +24,21 @@ beforeEach(function (): void {
     V2Schema::migrate();
 
     config([
+        'broadcasting.default' => 'pusher',
+        'broadcasting.connections.pusher.app_id' => 'local-app-id',
+        'broadcasting.connections.pusher.key' => 'local-key',
+        'broadcasting.connections.pusher.secret' => 'local-secret',
         'educonnect.notifications.push_transport' => 'log',
         'educonnect.realtime.enabled' => true,
         'educonnect.realtime.driver' => 'reverb',
         'educonnect.realtime.app_key' => 'local-key',
         'educonnect.realtime.app_secret' => 'local-secret',
+        'educonnect.realtime.host' => '127.0.0.1',
+        'educonnect.realtime.port' => 8080,
+        'educonnect.realtime.scheme' => 'http',
     ]);
+
+    Event::fake([MobileRealtimeEvent::class]);
 });
 
 it('lists and marks parent mobile notifications as read', function (): void {
