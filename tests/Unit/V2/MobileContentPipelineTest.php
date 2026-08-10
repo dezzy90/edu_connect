@@ -134,9 +134,9 @@ it('does not expose staff-only mobile messages to parent recipients', function (
         'school_id' => $school->id,
         'sender_type' => 'school_admin',
         'sender_name' => 'Demo School',
-        'category' => 'staff',
+        'category' => 'general',
         'priority' => 'normal',
-        'title' => 'Staff duty roster',
+        'title' => 'Staff notice',
         'body' => 'Internal staff planning note.',
         'audience_type' => 'parents',
         'status' => 'published',
@@ -157,16 +157,34 @@ it('does not expose staff-only mobile messages to parent recipients', function (
         'delivery_status' => 'queued',
     ]);
 
+    MobileNotification::query()->create([
+        'parent_account_id' => $parent->id,
+        'tenant_id' => $student->tenant_id,
+        'school_id' => $school->id,
+        'type' => 'messages',
+        'title' => $message->title,
+        'body' => 'You have a new school message.',
+        'data' => ['mobile_message_id' => $message->id],
+        'priority' => 'normal',
+        'channel' => 'in_app_push',
+        'delivery_status' => 'queued',
+    ]);
+
     $this->withToken($token)
         ->getJson('/api/mobile/v2/messages')
         ->assertOk()
-        ->assertJsonMissing(['title' => 'Staff duty roster']);
+        ->assertJsonMissing(['title' => 'Staff notice']);
 
     $this->withToken($token)
         ->getJson("/api/mobile/v2/messages/{$message->id}")
         ->assertNotFound();
 
     expect($leakedRecipient->exists)->toBeTrue();
+
+    $message->forceFill(['body' => 'Internal staff planning note updated.'])->save();
+
+    expect(MobileMessageRecipient::query()->where('message_id', $message->id)->count())->toBe(0);
+    expect(MobileNotification::query()->where('data->mobile_message_id', $message->id)->count())->toBe(0);
 });
 
 it('publishes due messages from the console command without duplicate recipients', function (): void {

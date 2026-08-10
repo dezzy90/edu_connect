@@ -25,6 +25,13 @@ class MobileMessagePublisher
             'skipped' => 0,
         ];
 
+        if (! $message->isParentVisible()) {
+            $this->clearParentDeliveries($message);
+            $stats['skipped']++;
+
+            return $stats;
+        }
+
         if (! $this->isPublishable($message)) {
             $stats['skipped']++;
 
@@ -113,10 +120,6 @@ class MobileMessagePublisher
 
     private function isPublishable(MobileMessage $message): bool
     {
-        if (MobileMessage::isStaffOnlyCategory($message->category)) {
-            return false;
-        }
-
         if ($message->status !== 'published') {
             return false;
         }
@@ -130,6 +133,18 @@ class MobileMessagePublisher
         }
 
         return true;
+    }
+
+    private function clearParentDeliveries(MobileMessage $message): void
+    {
+        MobileMessageRecipient::query()
+            ->where('message_id', $message->id)
+            ->delete();
+
+        MobileNotification::query()
+            ->where('type', 'messages')
+            ->where('data->mobile_message_id', $message->id)
+            ->delete();
     }
 
     private function recipientTargets(MobileMessage $message): Collection
