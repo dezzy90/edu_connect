@@ -3,6 +3,8 @@
 use App\Models\V2\AcademicClass;
 use App\Models\V2\AttendanceEvent;
 use App\Models\V2\BiometricDevice;
+use App\Models\V2\ConversationMessage;
+use App\Models\V2\ConversationThread;
 use App\Models\V2\MobileMessage;
 use App\Models\V2\MobileMessageRecipient;
 use App\Models\V2\MobileNotification;
@@ -91,7 +93,8 @@ it('publishes official mobile messages to linked parents and exposes the mobile 
         'priority' => 'normal',
         'title' => 'PTA meeting',
         'body' => 'The PTA meeting starts at 10:00 tomorrow.',
-        'audience_type' => 'parents',
+        'audience_type' => 'students',
+        'audience_filters' => ['student_ids' => [$student->id]],
         'status' => 'published',
         'published_at' => now(),
     ]);
@@ -100,8 +103,12 @@ it('publishes official mobile messages to linked parents and exposes the mobile 
 
     expect($recipient->message_id)->toBe($message->id);
     expect($recipient->parent_account_id)->toBe($parent->id);
-    expect($recipient->student_id)->toBeNull();
+    expect($recipient->student_id)->toBe($student->id);
     expect(MobileNotification::query()->where('type', 'messages')->count())->toBe(1);
+    expect(ConversationMessage::query()
+        ->where('metadata->source', 'official_mobile_message')
+        ->where('metadata->mobile_message_id', $message->id)
+        ->count())->toBe(0);
 
     $listResponse = $this->withToken($token)->getJson('/api/mobile/v2/messages');
 
@@ -123,6 +130,83 @@ it('publishes official mobile messages to linked parents and exposes the mobile 
 
     expect($recipient->refresh()->read_at)->not->toBeNull();
     expect($recipient->delivery_status)->toBe('read');
+});
+
+it('mirrors general parent notices into the school channel instead of the old notice inbox', function (): void {
+    [$parent, $student, $school] = createMobileContentGraph();
+
+    $message = MobileMessage::withoutEvents(fn () => MobileMessage::query()->create([
+        'tenant_id' => $student->tenant_id,
+        'school_id' => $school->id,
+        'sender_type' => 'school_admin',
+        'sender_name' => 'Demo School',
+        'category' => 'general',
+        'priority' => 'normal',
+        'title' => 'PTA meeting',
+        'body' => 'The PTA meeting starts at 10:00 tomorrow.',
+        'audience_type' => 'parents',
+        'status' => 'published',
+        'published_at' => now(),
+    ]));
+
+    $this->artisan('educonnect:publish-mobile-messages', [
+        '--limit' => 10,
+    ])->assertExitCode(0);
+
+    $channel = ConversationThread::query()
+        ->where('type', ConversationThread::TYPE_SCHOOL_CHANNEL)
+        ->where('school_id', $school->id)
+        ->firstOrFail();
+
+    expect(MobileMessageRecipient::query()->where('message_id', $message->id)->count())->toBe(0);
+    expect(MobileNotification::query()->where('type', 'messages')->count())->toBe(1);
+    expect(ConversationMessage::query()
+        ->where('thread_id', $channel->id)
+        ->where('metadata->source', 'official_mobile_message')
+        ->where('metadata->mobile_message_id', $message->id)
+        ->count())->toBe(1);
+    expect($parent->id)->toBeGreaterThan(0);
+});
+
+it('mirrors class notices into their class group without duplicate notification rows', function (): void {
+    [$parent, $student, $school] = createMobileContentGraph();
+
+    $message = MobileMessage::withoutEvents(fn () => MobileMessage::query()->create([
+        'tenant_id' => $student->tenant_id,
+        'school_id' => $school->id,
+        'sender_type' => 'school_admin',
+        'sender_name' => 'Demo School',
+        'category' => 'general',
+        'priority' => 'normal',
+        'title' => 'Physics practical',
+        'body' => 'The class practical starts at 11:00.',
+        'audience_type' => 'classes',
+        'audience_filters' => ['class_ids' => [$student->class_id]],
+        'status' => 'published',
+        'published_at' => now(),
+    ]));
+
+    $this->artisan('educonnect:publish-mobile-messages', [
+        '--limit' => 10,
+    ])->assertExitCode(0);
+
+    $this->artisan('educonnect:publish-mobile-messages', [
+        '--limit' => 10,
+    ])->assertExitCode(0);
+
+    $classGroup = ConversationThread::query()
+        ->where('type', ConversationThread::TYPE_CLASS_GROUP)
+        ->where('class_id', $student->class_id)
+        ->firstOrFail();
+
+    expect(MobileMessageRecipient::query()->where('message_id', $message->id)->count())->toBe(0);
+    expect(MobileNotification::query()->where('type', 'messages')->count())->toBe(1);
+    expect(ConversationMessage::query()
+        ->where('thread_id', $classGroup->id)
+        ->where('metadata->source', 'official_mobile_message')
+        ->where('metadata->mobile_message_id', $message->id)
+        ->count())->toBe(1);
+    expect($classGroup->refresh()->last_message_at)->not->toBeNull();
 });
 
 it('does not expose staff-only mobile messages to parent recipients', function (): void {

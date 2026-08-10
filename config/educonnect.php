@@ -8,6 +8,7 @@ return [
     'mobile' => [
         'token_expiration_minutes' => (int) env('MOBILE_TOKEN_EXPIRATION', 43200),
         'default_locale' => env('MOBILE_DEFAULT_LOCALE', 'en'),
+        'profile_refresh_ttl_seconds' => (int) env('MOBILE_PROFILE_REFRESH_TTL_SECONDS', 60),
     ],
 
     'attendance' => [
@@ -18,6 +19,8 @@ return [
     'notifications' => [
         'push_provider' => env('PUSH_PROVIDER', 'fcm'),
         'push_transport' => env('PUSH_TRANSPORT', 'log'),
+        'push_dispatch_mode' => env('PUSH_DISPATCH_MODE', env('APP_ENV') === 'testing' ? 'disabled' : 'inline'),
+        'push_inline_limit' => (int) env('PUSH_INLINE_LIMIT', 25),
         'push_timeout_seconds' => (int) env('PUSH_TIMEOUT_SECONDS', 10),
         'push_max_attempts' => (int) env('PUSH_MAX_ATTEMPTS', 3),
         'push_retry_backoff_seconds' => (int) env('PUSH_RETRY_BACKOFF_SECONDS', 300),

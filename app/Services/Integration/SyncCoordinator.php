@@ -180,6 +180,34 @@ class SyncCoordinator
         return $run->refresh();
     }
 
+    public function importResourceRecords(IntegrationConnection $connection, string $resource, iterable $records): array
+    {
+        $stats = [
+            'read' => 0,
+            'created' => 0,
+            'updated' => 0,
+            'failed' => 0,
+        ];
+
+        foreach ($records as $record) {
+            if (! is_array($record)) {
+                $stats['failed']++;
+                continue;
+            }
+
+            $stats['read']++;
+            $model = $this->upsertResourceRecord($connection, $resource, $record);
+
+            if ($model instanceof Model) {
+                $stats[$model->wasRecentlyCreated ? 'created' : 'updated']++;
+            } else {
+                $stats['failed']++;
+            }
+        }
+
+        return $stats;
+    }
+
     private function syncTenant(IntegrationConnection $connection, array $bootstrap): void
     {
         $complex = $bootstrap['complex'] ?? [];
@@ -442,7 +470,7 @@ class SyncCoordinator
                 'middle_name' => $record['middle_name'] ?? null,
                 'date_of_birth' => $record['date_of_birth'] ?? null,
                 'gender' => $record['gender'] ?? null,
-                'photo_path' => $record['photo_path'] ?? null,
+                'photo_path' => $record['photo_url'] ?? $record['photo_path'] ?? null,
                 'photo_hash' => $record['photo_hash'] ?? null,
                 'biometric_identifier' => $record['biometric_identifier'] ?? $record['biometric_id'] ?? null,
                 'status' => $record['status'] ?? 'active',

@@ -4,11 +4,14 @@ namespace App\Http\Controllers\Api\V2\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\V2\AttendanceEvent;
+use App\Models\V2\IntegrationConnection;
 use App\Models\V2\ParentAccount;
 use App\Models\V2\ParentStudentLink;
 use App\Models\V2\Student;
 use App\Models\V2\StudentMobileProfile;
 use App\Services\Conversations\ConversationService;
+use App\Services\Integration\EduAdminConnectorFactory;
+use App\Services\Integration\SyncCoordinator;
 use App\Services\Realtime\MobileRealtimeBroadcaster;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -237,6 +240,7 @@ class StudentController extends Controller
     public function profile(Request $request, Student $student): JsonResponse
     {
         $this->authorizeLinkedStudent($this->parent($request), $student);
+        $this->refreshLinkedStudentSnapshot($student);
 
         $student->load(['school', 'class']);
 
@@ -427,6 +431,7 @@ class StudentController extends Controller
             'gender' => $student->gender,
             'date_of_birth' => $student->date_of_birth?->toDateString(),
             'photo_path' => $student->photo_path,
+            'photo_url' => $this->studentPhotoUrl($student->photo_path),
             'status' => $student->status,
             'school' => $school ? [
                 'id' => $school->id,
@@ -440,6 +445,71 @@ class StudentController extends Controller
                 'full_name' => $class->full_name,
             ] : null,
         ];
+    }
+
+    private function studentPhotoUrl(?string $path): ?string
+    {
+        $path = trim((string) $path);
+
+        if ($path === '') {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://') || str_starts_with($path, 'data:image/')) {
+            return $path;
+        }
+
+        $path = ltrim($path, '/');
+
+        if (str_starts_with($path, 'storage/')) {
+            return url($path);
+        }
+
+        return url('storage/' . $path);
+    }
+
+    private function refreshLinkedStudentSnapshot(Student $student): void
+    {
+        if ($student->source_system !== 'edu_admin' || blank($student->source_id)) {
+            return;
+        }
+
+        $snapshot = StudentMobileProfile::query()
+            ->where('tenant_id', $student->tenant_id)
+            ->where('student_id', $student->id)
+            ->first();
+        $ttl = max(0, (int) config('educonnect.mobile.profile_refresh_ttl_seconds', 60));
+
+        if ($ttl > 0 && $snapshot?->updated_at?->gt(now()->subSeconds($ttl))) {
+            return;
+        }
+
+        $connection = IntegrationConnection::query()
+            ->where('tenant_id', $student->tenant_id)
+            ->where('status', 'active')
+            ->first();
+
+        if (! $connection) {
+            return;
+        }
+
+        try {
+            $connector = app(EduAdminConnectorFactory::class)->make($connection);
+            $sync = app(SyncCoordinator::class);
+            $filters = ['ids' => [$student->source_id]];
+
+            foreach (['students', 'student_mobile_profiles'] as $resource) {
+                $page = $connector->resource($resource, null, $filters);
+                $sync->importResourceRecords($connection, $resource, $page['data'] ?? []);
+            }
+        } catch (Throwable $exception) {
+            Log::warning('EduConnect on-demand student profile refresh failed.', [
+                'student_id' => $student->id,
+                'source_id' => $student->source_id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+        }
     }
 
     private function standaloneProfilePayload(Student $student): array

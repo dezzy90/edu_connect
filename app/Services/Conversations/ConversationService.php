@@ -322,6 +322,36 @@ class ConversationService
         });
     }
 
+    public function postSystemMessage(
+        ConversationThread $thread,
+        string $body,
+        string $senderDisplayName = 'EduConnect',
+        array $metadata = []
+    ): ConversationMessage {
+        if ($thread->status !== 'open') {
+            abort(403, 'This conversation is closed.');
+        }
+
+        return DB::transaction(function () use ($thread, $body, $senderDisplayName, $metadata): ConversationMessage {
+            if (in_array($thread->type, [ConversationThread::TYPE_CLASS_GROUP, ConversationThread::TYPE_SCHOOL_CHANNEL], true)) {
+                $this->syncParentParticipants($thread);
+                $this->syncAdminParticipants($thread);
+            }
+
+            $participant = $this->ensureSystemParticipant($thread, $senderDisplayName);
+
+            return $this->createMessage(
+                $thread,
+                ConversationMessage::SENDER_SYSTEM,
+                null,
+                $senderDisplayName,
+                $body,
+                $participant,
+                $metadata
+            );
+        });
+    }
+
     public function markReadForParent(ParentAccount $parent, ConversationThread $thread): int
     {
         $this->ensureParentCanAccessThread($parent, $thread);
@@ -446,6 +476,22 @@ class ConversationService
         );
     }
 
+    private function ensureSystemParticipant(ConversationThread $thread, string $displayName): ConversationParticipant
+    {
+        return ConversationParticipant::query()->firstOrCreate(
+            [
+                'thread_id' => $thread->id,
+                'participant_type' => ConversationParticipant::TYPE_SYSTEM,
+                'participant_id' => null,
+            ],
+            [
+                'display_name' => $displayName,
+                'role' => 'system',
+                'joined_at' => now(),
+            ]
+        );
+    }
+
     /**
      * @return Collection<int, int>
      */
@@ -543,7 +589,8 @@ class ConversationService
         ?int $senderId,
         string $senderDisplayName,
         string $body,
-        ConversationParticipant $senderParticipant
+        ConversationParticipant $senderParticipant,
+        array $metadata = []
     ): ConversationMessage {
         $message = ConversationMessage::query()->create([
             'thread_id' => $thread->id,
@@ -554,6 +601,7 @@ class ConversationService
             'body' => $body,
             'status' => 'sent',
             'sent_at' => now(),
+            'metadata' => $metadata ?: null,
         ]);
 
         $thread->forceFill(['last_message_at' => $message->sent_at])->save();

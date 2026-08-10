@@ -9,13 +9,21 @@ use App\Models\V2\NotificationPreference;
 use App\Models\V2\ParentAccount;
 use App\Models\V2\ParentStudentLink;
 use App\Models\V2\Student;
+use App\Models\V2\AcademicClass;
+use App\Models\V2\ConversationMessage;
+use App\Models\V2\ConversationThread;
+use App\Models\V2\School;
+use App\Services\Conversations\ConversationService;
 use App\Services\Realtime\MobileRealtimeBroadcaster;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 class MobileMessagePublisher
 {
-    public function __construct(private readonly MobileRealtimeBroadcaster $realtime) {}
+    public function __construct(
+        private readonly MobileRealtimeBroadcaster $realtime,
+        private readonly ConversationService $conversations,
+    ) {}
 
     public function publish(MobileMessage $message): array
     {
@@ -34,6 +42,14 @@ class MobileMessagePublisher
 
         if (! $this->isPublishable($message)) {
             $stats['skipped']++;
+
+            return $stats;
+        }
+
+        $mirroredToConversation = $this->mirrorToConversation($message);
+
+        if ($mirroredToConversation) {
+            $this->clearParentDeliveries($message);
 
             return $stats;
         }
@@ -257,6 +273,84 @@ class MobileMessagePublisher
             ->filter()
             ->values()
             ->all();
+    }
+
+    private function mirrorToConversation(MobileMessage $message): bool
+    {
+        $threads = collect();
+        $filters = $message->audience_filters ?? [];
+
+        if (in_array($message->audience_type, ['classes', 'class'], true)) {
+            $classIds = $this->filterIds($filters, 'class_ids');
+
+            $threads = AcademicClass::query()
+                ->where('tenant_id', $message->tenant_id)
+                ->where('school_id', $message->school_id)
+                ->whereIn('id', $classIds)
+                ->get()
+                ->map(fn (AcademicClass $class) => $this->conversations->findOrCreateClassGroup($class));
+        } elseif (blank($message->audience_type) || in_array($message->audience_type, ['parents', 'all', 'school', 'general'], true)) {
+            $school = School::query()
+                ->where('tenant_id', $message->tenant_id)
+                ->find($message->school_id);
+
+            if ($school) {
+                $threads->push($this->conversations->findOrCreateSchoolChannel($school));
+            }
+        }
+
+        $threads = $threads
+            ->filter(fn ($thread) => $thread instanceof ConversationThread)
+            ->unique('id')
+            ->values();
+
+        foreach ($threads as $thread) {
+            if ($this->conversationMirrorExists($thread, $message)) {
+                continue;
+            }
+
+            $this->conversations->postSystemMessage(
+                $thread,
+                $this->conversationBody($message),
+                $message->sender_name ?: 'School administration',
+                [
+                    'source' => 'official_mobile_message',
+                    'mobile_message_id' => $message->id,
+                    'mobile_message_source_system' => $message->source_system,
+                    'mobile_message_source_id' => $message->source_id,
+                    'category' => $message->category,
+                    'priority' => $message->priority,
+                ]
+            );
+        }
+
+        return $threads->isNotEmpty();
+    }
+
+    private function conversationMirrorExists(ConversationThread $thread, MobileMessage $message): bool
+    {
+        return ConversationMessage::query()
+            ->where('thread_id', $thread->id)
+            ->where('sender_type', ConversationMessage::SENDER_SYSTEM)
+            ->where('metadata->source', 'official_mobile_message')
+            ->where('metadata->mobile_message_id', $message->id)
+            ->exists();
+    }
+
+    private function conversationBody(MobileMessage $message): string
+    {
+        $title = trim((string) $message->title);
+        $body = trim((string) $message->body);
+
+        if ($title === '') {
+            return $body;
+        }
+
+        if ($body === '') {
+            return $title;
+        }
+
+        return "{$title}\n\n{$body}";
     }
 
     private function filterStrings(array $filters, string $key): array

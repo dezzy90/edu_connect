@@ -7,6 +7,8 @@ use App\Models\V2\IntegrationAuditEvent;
 use App\Models\V2\IntegrationConnection;
 use App\Models\V2\IntegrationMapping;
 use App\Models\V2\IntegrationSyncItem;
+use App\Models\V2\ConversationMessage;
+use App\Models\V2\ConversationThread;
 use App\Models\V2\MobileMessage;
 use App\Models\V2\MobileMessageRecipient;
 use App\Models\V2\MobileNotification;
@@ -87,7 +89,7 @@ it('imports the Edu-admin foundation graph and keeps the sync idempotent', funct
     expect(MobileMessage::query()->count())->toBe(1);
 });
 
-it('pulls Edu-admin mobile messages incrementally and publishes them to linked parents', function (): void {
+it('pulls Edu-admin mobile messages incrementally and mirrors parent notices to school channels', function (): void {
     $tenant = Tenant::query()->create([
         'name' => 'Local Demo',
         'slug' => 'local-demo',
@@ -143,8 +145,15 @@ it('pulls Edu-admin mobile messages incrementally and publishes them to linked p
     expect($message->status)->toBe('published');
     expect($message->title)->toBe('Parent Orientation Reminder');
 
-    expect(MobileMessageRecipient::query()->count())->toBe(1);
-    expect(MobileNotification::query()->where('type', 'messages')->count())->toBe(1);
+    expect(MobileMessageRecipient::query()->count())->toBe(0);
+    expect(MobileNotification::query()->where('type', 'messages')->count())->toBe(0);
+    expect(ConversationMessage::query()
+        ->where('sender_type', ConversationMessage::SENDER_SYSTEM)
+        ->where('metadata->source', 'official_mobile_message')
+        ->where('metadata->mobile_message_id', $message->id)
+        ->whereHas('thread', fn ($query) => $query->where('type', ConversationThread::TYPE_SCHOOL_CHANNEL))
+        ->count()
+    )->toBe(1);
     expect(IntegrationMapping::query()->where('external_type', 'mobile_message')->value('external_id'))->toBe('90');
     expect(IntegrationAuditEvent::query()->where('event_type', 'sync.incremental.completed')->count())->toBe(1);
     expect(IntegrationAuditEvent::query()->where('event_type', 'messages.ingested')->count())->toBe(2);

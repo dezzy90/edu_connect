@@ -4,6 +4,7 @@ use App\Events\V2\MobileRealtimeEvent;
 use App\Models\V2\AcademicClass;
 use App\Models\V2\AttendanceEvent;
 use App\Models\V2\BiometricDevice;
+use App\Models\V2\ConversationMessage;
 use App\Models\V2\ConversationThread;
 use App\Models\V2\MobileMessage;
 use App\Models\V2\MobileNotification;
@@ -91,7 +92,7 @@ it('broadcasts attendance updates without leaking them to class or school-wide p
     });
 });
 
-it('broadcasts official mobile message recipient publication events', function (): void {
+it('broadcasts official school notices as conversation messages', function (): void {
     [$parent, $student, $school] = createBroadcastGraph();
     Event::fake([MobileRealtimeEvent::class]);
 
@@ -109,14 +110,16 @@ it('broadcasts official mobile message recipient publication events', function (
         'published_at' => now(),
     ]);
 
-    Event::assertDispatched(MobileRealtimeEvent::class, function (MobileRealtimeEvent $event) use ($parent, $school, $message): bool {
+    Event::assertDispatched(MobileRealtimeEvent::class, function (MobileRealtimeEvent $event) use ($school, $message): bool {
         $channels = broadcastEventChannels($event);
 
-        return $event->eventName === 'mobile.message.published'
-            && $event->payload['mobile_message_id'] === $message->id
-            && in_array("private-parent.{$parent->id}", $channels, true)
-            && in_array("private-parent.{$parent->id}.notifications", $channels, true)
-            && in_array("private-school.{$school->id}.parent.{$parent->id}", $channels, true);
+        return $event->eventName === 'mobile.conversation.message.created'
+            && $event->payload['thread']['type'] === ConversationThread::TYPE_SCHOOL_CHANNEL
+            && $event->payload['thread']['school_id'] === $school->id
+            && $event->payload['message']['sender_type'] === ConversationMessage::SENDER_SYSTEM
+            && str_contains($event->payload['message']['body'], $message->title)
+            && in_array("private-conversation.{$event->payload['thread']['id']}", $channels, true)
+            && in_array("private-school.{$school->id}.channels", $channels, true);
     });
 });
 
