@@ -8,6 +8,7 @@ use App\Models\V2\School;
 use App\Models\V2\Student;
 use App\Models\V2\StudentMobileProfile;
 use App\Models\V2\Tenant;
+use Illuminate\Support\Facades\Crypt;
 use Laravel\Sanctum\Sanctum;
 use Tests\Support\V2Schema;
 
@@ -300,3 +301,81 @@ it('runs incremental sync from the console command', function (): void {
     expect(IntegrationSyncRun::query()->latest('id')->first()->sync_type)->toBe('incremental');
     expect(IntegrationSyncRun::query()->latest('id')->first()->records_read)->toBe(1);
 });
+
+it('accepts signed Edu-admin message webhooks and imports the message immediately', function (): void {
+    $tenant = Tenant::query()->create([
+        'name' => 'Webhook Tenant',
+        'slug' => 'webhook-tenant',
+        'status' => 'active',
+    ]);
+
+    $connection = IntegrationConnection::query()->create([
+        'tenant_id' => $tenant->id,
+        'provider' => 'edu_admin',
+        'mode' => 'connected',
+        'status' => 'active',
+        'remote_tenant_id' => '100',
+        'webhook_secret' => Crypt::encryptString('webhook-shared-secret'),
+    ]);
+
+    $this->artisan('educonnect:sync-initial', [
+        'connection_id' => $connection->id,
+        '--driver' => 'fixture',
+    ])->assertExitCode(0);
+
+    $payload = [
+        'event_type' => 'communication.message.sent',
+        'complex_id' => 100,
+        'message_id' => 90,
+        'school_id' => 10,
+        'status' => 'sent',
+        'sent_at' => '2026-08-07T08:13:00Z',
+        'updated_at' => '2026-08-07T08:13:00Z',
+    ];
+
+    $this->postJson('/api/integrations/v2/edu-admin/mobile-message-published', $payload)
+        ->assertUnauthorized()
+        ->assertJsonPath('message', 'Missing Edu-admin webhook signature.');
+
+    $this->postJson(
+        '/api/integrations/v2/edu-admin/mobile-message-published',
+        $payload,
+        eduAdminWebhookHeaders($payload, 'webhook-shared-secret', signature: 'sha256=bad-signature'),
+    )
+        ->assertUnauthorized()
+        ->assertJsonPath('message', 'Invalid Edu-admin webhook signature.');
+
+    $this->postJson(
+        '/api/integrations/v2/edu-admin/mobile-message-published',
+        $payload,
+        eduAdminWebhookHeaders($payload, 'webhook-shared-secret'),
+    )
+        ->assertOk()
+        ->assertJsonPath('data.connection_id', $connection->id)
+        ->assertJsonPath('data.source_message_id', 90)
+        ->assertJsonPath('data.sync_run.status', 'completed')
+        ->assertJsonPath('data.sync_run.records_read', 1)
+        ->assertJsonPath('data.published.messages', 1);
+
+    $run = IntegrationSyncRun::query()->latest('id')->firstOrFail();
+
+    expect($run->metadata['source'])->toBe('edu_admin_webhook');
+    expect($run->metadata['source_message_id'])->toBe(90);
+});
+
+function eduAdminWebhookHeaders(
+    array $payload,
+    string $secret,
+    ?int $timestamp = null,
+    ?string $signature = null
+): array {
+    $timestamp ??= now()->timestamp;
+    $body = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $signature ??= 'sha256=' . hash_hmac('sha256', $timestamp . '.' . $body, $secret);
+
+    return [
+        'X-Edu-Admin-Timestamp' => (string) $timestamp,
+        'X-Edu-Admin-Signature' => $signature,
+        'X-Edu-Admin-Complex-Id' => (string) $payload['complex_id'],
+    ];
+}

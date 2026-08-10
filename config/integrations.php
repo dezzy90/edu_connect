@@ -55,4 +55,11 @@ return [
         'push_dispatch_limit' => (int) env('EDUCONNECT_PUSH_DISPATCH_LIMIT', 50),
         'overlap_expiration_minutes' => (int) env('EDUCONNECT_SCHEDULE_OVERLAP_EXPIRATION_MINUTES', 30),
     ],
+
+    'webhooks' => [
+        'edu_admin' => [
+            'signature_tolerance_seconds' => (int) env('EDU_ADMIN_WEBHOOK_SIGNATURE_TOLERANCE', 300),
+            'mobile_message_publish_limit' => (int) env('EDU_ADMIN_WEBHOOK_MOBILE_MESSAGE_PUBLISH_LIMIT', 25),
+        ],
+    ],
 ];
