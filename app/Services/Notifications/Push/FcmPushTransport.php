@@ -70,7 +70,7 @@ class FcmPushTransport implements PushTransport
                 'android' => [
                     'priority' => $this->isHighPriority($notification) ? 'HIGH' : 'NORMAL',
                     'notification' => [
-                        'channel_id' => 'educonnect_' . $notification->type,
+                        'channel_id' => $this->androidChannelId($notification),
                         'sound' => 'default',
                         'visibility' => 'PUBLIC',
                     ],
@@ -235,6 +235,15 @@ class FcmPushTransport implements PushTransport
     {
         return in_array($notification->priority, ['high', 'urgent', 'critical'], true)
             || in_array($notification->type, ['attendance', 'messages'], true);
+    }
+
+    private function androidChannelId(MobileNotification $notification): string
+    {
+        return match ($notification->type) {
+            'messages', 'message', 'chat', 'conversation' => 'educonnect_messages',
+            'attendance' => 'educonnect_attendance',
+            default => 'educonnect_general',
+        };
     }
 
     private function timeout(): int

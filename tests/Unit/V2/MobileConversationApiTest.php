@@ -256,6 +256,45 @@ it('creates separate direct conversation threads for named school desks', functi
         ->and($sameAccountsThread['id'])->toBe($accountsThread['id']);
 });
 
+it('returns delivered and read receipt state for parent-owned messages', function (): void {
+    [$parent, $schoolA, $classA, $studentA] = createConversationGraph();
+    $schoolAdmin = createConversationAdmin('Receipt Admin', 'receipt-admin@example.com', 'school_admin', 701);
+    $parentToken = conversationParentToken($parent);
+    conversationForgetGuards();
+
+    $directResponse = $this->flushHeaders()->withToken($parentToken)
+        ->postJson('/api/mobile/v2/conversations/direct', [
+            'student_id' => $studentA->id,
+            'body' => 'Please confirm you have seen this.',
+        ])
+        ->assertCreated();
+
+    $threadId = $directResponse->json('data.thread.id');
+    $messageId = $directResponse->json('data.message.id');
+
+    conversationForgetGuards();
+
+    $this->flushHeaders()->withToken(conversationAdminToken($schoolAdmin))
+        ->postJson("/api/admin/v2/conversations/{$threadId}/read")
+        ->assertOk()
+        ->assertJsonPath('data.marked_read', 1);
+
+    conversationForgetGuards();
+
+    $response = $this->flushHeaders()->withToken($parentToken)
+        ->getJson("/api/mobile/v2/conversations/{$threadId}")
+        ->assertOk();
+
+    $message = collect($response->json('data.messages'))
+        ->firstWhere('id', $messageId);
+
+    expect($message['own_message'])->toBeTrue()
+        ->and($message['delivered_to_count'])->toBe(1)
+        ->and($message['read_by_count'])->toBe(1)
+        ->and($message['delivered_at'])->not->toBeNull()
+        ->and($message['read_at'])->not->toBeNull();
+});
+
 it('exposes automatic conversation realtime channels for linked parents only', function (): void {
     [$parent, $schoolA, $classA] = createConversationGraph();
     $token = conversationParentToken($parent);

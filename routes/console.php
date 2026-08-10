@@ -3,6 +3,11 @@
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use App\Models\V2\IntegrationConnection;
+use App\Models\V2\MobileNotification;
+use App\Models\V2\MobilePushToken;
+use App\Models\V2\NotificationDelivery;
+use App\Models\V2\ParentAccount;
+use App\Models\V2\Tenant;
 use App\Jobs\V2\Integration\PushEduAdminAttendanceOutboxJob;
 use App\Jobs\V2\Integration\RunEduAdminIncrementalSyncJob;
 use App\Jobs\V2\Notifications\DispatchMobilePushNotificationsJob;
@@ -165,6 +170,198 @@ Artisan::command('educonnect:dispatch-push-notifications {--limit=50 : Maximum n
         $sent['failed']
     ));
 })->purpose('Create and dispatch mobile push notification delivery rows');
+
+Artisan::command('educonnect:push-check {--parent= : Parent account ID to inspect or test} {--send : Send a real test push to the selected parent} {--json : Output machine-readable JSON}', function (
+    PushNotificationDispatcher $dispatcher
+) {
+    $parentId = (int) ($this->option('parent') ?: 0);
+    $tokenQuery = MobilePushToken::query()
+        ->with('parentAccount')
+        ->whereNull('revoked_at')
+        ->latest('last_seen_at')
+        ->latest('id');
+
+    if ($parentId > 0) {
+        $tokenQuery->where('parent_account_id', $parentId);
+    }
+
+    $sampleToken = $tokenQuery->first();
+    $deliveryCounts = NotificationDelivery::query()
+        ->selectRaw('status, COUNT(*) as aggregate')
+        ->groupBy('status')
+        ->pluck('aggregate', 'status');
+    $recentFailures = NotificationDelivery::query()
+        ->whereIn('status', ['failed', 'skipped'])
+        ->latest('updated_at')
+        ->limit(5)
+        ->get(['id', 'notification_id', 'push_token_id', 'status', 'attempts', 'last_error', 'updated_at'])
+        ->map(fn (NotificationDelivery $delivery): array => [
+            'id' => $delivery->id,
+            'notification_id' => $delivery->notification_id,
+            'push_token_id' => $delivery->push_token_id,
+            'status' => $delivery->status,
+            'attempts' => $delivery->attempts,
+            'last_error' => $delivery->last_error,
+            'updated_at' => $delivery->updated_at?->toIso8601String(),
+        ])
+        ->values()
+        ->all();
+
+    $path = config('educonnect.notifications.fcm.credentials_path');
+    $health = [
+        'push_provider' => config('educonnect.notifications.push_provider'),
+        'push_transport' => config('educonnect.notifications.push_transport'),
+        'push_dispatch_mode' => config('educonnect.notifications.push_dispatch_mode'),
+        'fcm_project_id_configured' => filled(config('educonnect.notifications.fcm.project_id')),
+        'fcm_access_token_configured' => filled(config('educonnect.notifications.fcm.access_token')),
+        'fcm_credentials_json_configured' => filled(config('educonnect.notifications.fcm.credentials_json')),
+        'fcm_credentials_path' => filled($path) ? (string) $path : null,
+        'fcm_credentials_path_readable' => filled($path) && is_readable((string) $path),
+        'active_push_tokens' => MobilePushToken::query()->whereNull('revoked_at')->count(),
+        'parents_with_active_tokens' => MobilePushToken::query()
+            ->whereNull('revoked_at')
+            ->distinct('parent_account_id')
+            ->count('parent_account_id'),
+        'delivery_counts' => [
+            'queued' => (int) ($deliveryCounts['queued'] ?? 0),
+            'sent' => (int) ($deliveryCounts['sent'] ?? 0),
+            'failed' => (int) ($deliveryCounts['failed'] ?? 0),
+            'skipped' => (int) ($deliveryCounts['skipped'] ?? 0),
+        ],
+        'selected_parent_id' => $sampleToken?->parent_account_id,
+        'selected_token_id' => $sampleToken?->id,
+        'selected_platform' => $sampleToken?->platform,
+        'selected_token_last_seen_at' => $sampleToken?->last_seen_at?->toIso8601String(),
+        'recent_failures' => $recentFailures,
+    ];
+
+    if ($this->option('send')) {
+        if (! $sampleToken || ! $sampleToken->parentAccount) {
+            $health['test_push'] = [
+                'status' => 'not_sent',
+                'reason' => $parentId > 0
+                    ? "No active push token was found for parent #{$parentId}."
+                    : 'No active push token was found.',
+            ];
+        } else {
+            /** @var ParentAccount $parent */
+            $parent = $sampleToken->parentAccount;
+            $link = $parent->studentLinks()
+                ->with('student:id,tenant_id,school_id')
+                ->where('status', 'active')
+                ->latest('id')
+                ->first();
+            $tenantId = $link?->student?->tenant_id ?: Tenant::query()->value('id');
+
+            if (! $tenantId) {
+                $health['test_push'] = [
+                    'status' => 'not_sent',
+                    'reason' => 'No tenant exists for the selected parent.',
+                ];
+            } else {
+                $notification = MobileNotification::query()->create([
+                    'parent_account_id' => $parent->id,
+                    'tenant_id' => $tenantId,
+                    'school_id' => $link?->student?->school_id,
+                    'type' => 'messages',
+                    'title' => 'EduConnect test message',
+                    'body' => 'This is a test notification from EduConnect.',
+                    'data' => [
+                        'diagnostic' => 'push-check',
+                        'parent_account_id' => $parent->id,
+                    ],
+                    'priority' => 'urgent',
+                    'channel' => 'in_app_push',
+                    'delivery_status' => 'queued',
+                ]);
+
+                $queued = $dispatcher->enqueueNotification($notification);
+                $sent = $dispatcher->dispatchQueued(10);
+                $delivery = NotificationDelivery::query()
+                    ->where('notification_id', $notification->id)
+                    ->latest('id')
+                    ->first();
+
+                $health['test_push'] = [
+                    'status' => $delivery?->status ?? 'queued',
+                    'notification_id' => $notification->id,
+                    'delivery_id' => $delivery?->id,
+                    'queued' => $queued,
+                    'sent' => $sent['sent'],
+                    'failed' => $sent['failed'],
+                    'skipped' => $sent['skipped'],
+                    'last_error' => $delivery?->last_error,
+                ];
+            }
+        }
+    }
+
+    if ($this->option('json')) {
+        $this->line(json_encode($health, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        return 0;
+    }
+
+    $this->line('EduConnect push status');
+    $this->line('Provider: ' . $health['push_provider']);
+    $this->line('Transport: ' . $health['push_transport']);
+    $this->line('Dispatch mode: ' . $health['push_dispatch_mode']);
+    $this->line('FCM project ID configured: ' . ($health['fcm_project_id_configured'] ? 'yes' : 'no'));
+    $this->line('FCM credentials path readable: ' . ($health['fcm_credentials_path_readable'] ? 'yes' : 'no'));
+    $this->line('Active push tokens: ' . $health['active_push_tokens']);
+    $this->line('Parents with active tokens: ' . $health['parents_with_active_tokens']);
+    $this->line(sprintf(
+        'Deliveries: queued=%d sent=%d failed=%d skipped=%d',
+        $health['delivery_counts']['queued'],
+        $health['delivery_counts']['sent'],
+        $health['delivery_counts']['failed'],
+        $health['delivery_counts']['skipped'],
+    ));
+
+    if ($sampleToken) {
+        $this->line(sprintf(
+            'Selected token: #%d parent=%d platform=%s last_seen=%s',
+            $sampleToken->id,
+            $sampleToken->parent_account_id,
+            $sampleToken->platform,
+            $sampleToken->last_seen_at?->toDateTimeString() ?? 'never',
+        ));
+    } else {
+        $this->warn('No active push token found. Open the mobile app, allow notifications, and sign in again.');
+    }
+
+    foreach ($recentFailures as $failure) {
+        $this->warn(sprintf(
+            'Recent %s delivery #%d: %s',
+            $failure['status'],
+            $failure['id'],
+            $failure['last_error'] ?: 'no error recorded',
+        ));
+    }
+
+    if (isset($health['test_push'])) {
+        $test = $health['test_push'];
+        $this->line(sprintf(
+            'Test push: status=%s notification=%s delivery=%s sent=%d failed=%d skipped=%d',
+            $test['status'],
+            $test['notification_id'] ?? 'none',
+            $test['delivery_id'] ?? 'none',
+            $test['sent'] ?? 0,
+            $test['failed'] ?? 0,
+            $test['skipped'] ?? 0,
+        ));
+
+        if (! empty($test['reason'])) {
+            $this->warn($test['reason']);
+        }
+
+        if (! empty($test['last_error'])) {
+            $this->error($test['last_error']);
+        }
+    }
+
+    return 0;
+})->purpose('Inspect EduConnect push configuration, tokens, delivery status, and optionally send a real test push');
 
 Artisan::command('educonnect:publish-mobile-messages {--limit=50 : Maximum published messages to expand into recipients}', function (
     MobileMessagePublisher $publisher

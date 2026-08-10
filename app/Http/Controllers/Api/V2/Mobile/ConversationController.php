@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V2\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\V2\ConversationMessage;
+use App\Models\V2\ConversationMessageReceipt;
 use App\Models\V2\ConversationThread;
 use App\Models\V2\ParentAccount;
 use App\Models\V2\Student;
@@ -208,6 +209,9 @@ class ConversationController extends Controller
 
     private function messagePayload(ConversationMessage $message, ParentAccount $parent): array
     {
+        $ownMessage = $message->sender_type === ConversationMessage::SENDER_PARENT
+            && (int) $message->sender_id === (int) $parent->id;
+
         return [
             'id' => $message->id,
             'thread_id' => $message->thread_id,
@@ -218,8 +222,38 @@ class ConversationController extends Controller
             'body' => $message->body,
             'status' => $message->status,
             'sent_at' => $message->sent_at?->toIso8601String(),
-            'own_message' => $message->sender_type === ConversationMessage::SENDER_PARENT
-                && (int) $message->sender_id === (int) $parent->id,
+            'own_message' => $ownMessage,
+        ] + ($ownMessage ? $this->receiptPayload($message, $parent) : []);
+    }
+
+    private function receiptPayload(ConversationMessage $message, ParentAccount $parent): array
+    {
+        $receipts = ConversationMessageReceipt::query()
+            ->where('message_id', $message->id)
+            ->whereHas('participant', function (Builder $query) use ($parent): void {
+                $query->where(function (Builder $participant) use ($parent): void {
+                    $participant->where('participant_type', '!=', ConversationMessage::SENDER_PARENT)
+                        ->orWhere('participant_id', '!=', $parent->id);
+                });
+            })
+            ->get(['delivered_at', 'read_at']);
+
+        $deliveredAt = $receipts
+            ->pluck('delivered_at')
+            ->filter()
+            ->sortByDesc(fn ($date) => $date->getTimestamp())
+            ->first();
+        $readAt = $receipts
+            ->pluck('read_at')
+            ->filter()
+            ->sortByDesc(fn ($date) => $date->getTimestamp())
+            ->first();
+
+        return [
+            'delivered_at' => $deliveredAt?->toIso8601String(),
+            'read_at' => $readAt?->toIso8601String(),
+            'delivered_to_count' => $receipts->whereNotNull('delivered_at')->count(),
+            'read_by_count' => $receipts->whereNotNull('read_at')->count(),
         ];
     }
 }
