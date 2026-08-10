@@ -94,6 +94,29 @@ class AuthController extends Controller
         ]);
     }
 
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'identifier' => ['required', 'string', 'max:255'],
+        ]);
+
+        $parent = $this->findParentByIdentifier((string) $validated['identifier']);
+
+        if ($parent) {
+            $parent->forceFill([
+                'settings' => array_merge($parent->settings ?? [], [
+                    'password_help_requested_at' => now()->toIso8601String(),
+                ]),
+            ])->save();
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'If this parent account exists, the school can verify you and help reset the password.',
+            'data' => null,
+        ]);
+    }
+
     public function me(Request $request): JsonResponse
     {
         /** @var ParentAccount $parent */

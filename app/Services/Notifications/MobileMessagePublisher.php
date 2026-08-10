@@ -76,7 +76,8 @@ class MobileMessagePublisher
                     return;
                 }
 
-                $preferences = $this->preferences($parent, 'messages');
+                $notificationType = $this->notificationType($message);
+                $preferences = $this->preferences($parent, $notificationType);
 
                 if (! $preferences['in_app_enabled'] && ! $preferences['push_enabled']) {
                     return;
@@ -86,11 +87,9 @@ class MobileMessagePublisher
                     'parent_account_id' => $parent->id,
                     'tenant_id' => $message->tenant_id,
                     'school_id' => $message->school_id,
-                    'type' => 'messages',
+                    'type' => $notificationType,
                     'title' => $message->title,
-                    'body' => config('educonnect.notifications.privacy_mode', 'discreet') === 'discreet'
-                        ? 'You have a new school message.'
-                        : $message->body,
+                    'body' => $this->notificationBody($message),
                     'data' => [
                         'mobile_message_id' => $message->id,
                         'recipient_id' => $recipient->id,
@@ -158,7 +157,6 @@ class MobileMessagePublisher
             ->delete();
 
         MobileNotification::query()
-            ->where('type', 'messages')
             ->where('data->mobile_message_id', $message->id)
             ->delete();
     }
@@ -235,9 +233,24 @@ class MobileMessagePublisher
     {
         return MobileNotification::query()
             ->where('parent_account_id', $parent->id)
-            ->where('type', 'messages')
             ->where('data->mobile_message_id', $message->id)
             ->exists();
+    }
+
+    private function notificationType(MobileMessage $message): string
+    {
+        return $message->category === 'discipline' ? 'discipline' : 'messages';
+    }
+
+    private function notificationBody(MobileMessage $message): string
+    {
+        if (in_array(config('educonnect.notifications.privacy_mode', 'preview'), ['hidden', 'private'], true)) {
+            return $message->category === 'discipline'
+                ? 'A discipline update was shared by the school.'
+                : 'You have a new school message.';
+        }
+
+        return (string) $message->body;
     }
 
     private function preferences(ParentAccount $parent, string $category): array

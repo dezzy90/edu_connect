@@ -234,13 +234,13 @@ class FcmPushTransport implements PushTransport
     private function isHighPriority(MobileNotification $notification): bool
     {
         return in_array($notification->priority, ['high', 'urgent', 'critical'], true)
-            || in_array($notification->type, ['attendance', 'messages'], true);
+            || in_array($notification->type, ['attendance', 'messages', 'discipline'], true);
     }
 
     private function androidChannelId(MobileNotification $notification): string
     {
         return match ($notification->type) {
-            'messages', 'message', 'chat', 'conversation' => 'educonnect_messages',
+            'messages', 'message', 'chat', 'conversation', 'discipline' => 'educonnect_messages',
             'attendance' => 'educonnect_attendance',
             default => 'educonnect_general',
         };

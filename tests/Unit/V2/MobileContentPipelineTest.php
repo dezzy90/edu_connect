@@ -271,6 +271,34 @@ it('does not expose staff-only mobile messages to parent recipients', function (
     expect(MobileNotification::query()->where('data->mobile_message_id', $message->id)->count())->toBe(0);
 });
 
+it('publishes discipline messages as targeted discipline notifications', function (): void {
+    [$parent, $student, $school] = createMobileContentGraph();
+
+    $message = MobileMessage::query()->create([
+        'tenant_id' => $student->tenant_id,
+        'school_id' => $school->id,
+        'sender_type' => 'school_admin',
+        'sender_name' => 'Discipline office',
+        'category' => 'discipline',
+        'priority' => 'high',
+        'title' => 'Discipline follow-up',
+        'body' => 'Franklin has a conduct follow-up scheduled for tomorrow.',
+        'audience_type' => 'students',
+        'audience_filters' => ['student_ids' => [$student->id]],
+        'status' => 'published',
+        'published_at' => now(),
+    ]);
+
+    $notification = MobileNotification::query()->firstOrFail();
+
+    expect($notification->parent_account_id)->toBe($parent->id);
+    expect($notification->type)->toBe('discipline');
+    expect($notification->title)->toBe('Discipline follow-up');
+    expect($notification->body)->toBe('Franklin has a conduct follow-up scheduled for tomorrow.');
+    expect($notification->data['mobile_message_id'])->toBe($message->id);
+    expect($notification->data['student_id'])->toBe($student->id);
+});
+
 it('publishes due messages from the console command without duplicate recipients', function (): void {
     [$parent, $student, $school] = createMobileContentGraph();
 

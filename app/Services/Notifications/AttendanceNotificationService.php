@@ -58,7 +58,7 @@ class AttendanceNotificationService
     {
         $student = $event->student;
         $schoolId = $event->school_id ?: $student?->school_id;
-        $isDiscreet = config('educonnect.notifications.privacy_mode', 'discreet') === 'discreet';
+        $isDiscreet = in_array(config('educonnect.notifications.privacy_mode', 'preview'), ['hidden', 'private'], true);
         $eventLabel = $this->eventLabel($event->event_type);
 
         return [

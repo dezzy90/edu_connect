@@ -670,13 +670,14 @@ class ConversationService
                     'school_id' => $thread->school_id,
                     'type' => 'messages',
                     'title' => $thread->title,
-                    'body' => config('educonnect.notifications.privacy_mode', 'discreet') === 'discreet'
+                    'body' => in_array(config('educonnect.notifications.privacy_mode', 'preview'), ['hidden', 'private'], true)
                         ? 'You have a new conversation message.'
                         : (string) $message->body,
                     'data' => [
                         'conversation_thread_id' => $thread->id,
                         'conversation_message_id' => $message->id,
                         'conversation_type' => $thread->type,
+                        'category' => $message->metadata['category'] ?? 'messages',
                         'school_id' => $thread->school_id,
                         'class_id' => $thread->class_id,
                         'student_id' => $thread->student_id,

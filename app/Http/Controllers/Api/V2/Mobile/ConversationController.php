@@ -117,6 +117,10 @@ class ConversationController extends Controller
             ->reverse()
             ->values();
 
+        if (empty($validated['before_id'])) {
+            $conversations->markReadForParent($parent, $thread);
+        }
+
         return response()->json([
             'status' => 'success',
             'data' => [

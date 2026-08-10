@@ -25,7 +25,7 @@ return [
         'push_max_attempts' => (int) env('PUSH_MAX_ATTEMPTS', 3),
         'push_retry_backoff_seconds' => (int) env('PUSH_RETRY_BACKOFF_SECONDS', 300),
         'push_max_retry_backoff_seconds' => (int) env('PUSH_MAX_RETRY_BACKOFF_SECONDS', 3600),
-        'privacy_mode' => env('PUSH_PRIVACY_MODE', 'discreet'),
+        'privacy_mode' => env('PUSH_PRIVACY_MODE', 'preview'),
         'fcm' => [
             'project_id' => env('FCM_PROJECT_ID'),
             'access_token' => env('FCM_ACCESS_TOKEN'),
