@@ -39,6 +39,13 @@ class HttpEduAdminConnector implements EduAdminConnector
         ]);
     }
 
+    public function pushConversationMessage(array $message): array
+    {
+        return $this->post('/api/v1/integrations/edu-connect/conversation-messages', $message, [
+            'Idempotency-Key' => 'conversation-message:' . hash('sha256', (string) ($message['event_key'] ?? json_encode($message))),
+        ]);
+    }
+
     private function get(string $path, array $query = []): array
     {
         $response = Http::acceptJson()

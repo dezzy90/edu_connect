@@ -15,6 +15,7 @@ use App\Models\V2\ParentStudentLink;
 use App\Models\V2\School;
 use App\Models\V2\Student;
 use App\Services\Realtime\MobileRealtimeBroadcaster;
+use App\Services\Integration\ParentConversationWebhookNotifier;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -282,7 +283,7 @@ class ConversationService
     {
         $this->ensureParentCanPost($parent, $thread);
 
-        return DB::transaction(function () use ($parent, $thread, $body): ConversationMessage {
+        $message = DB::transaction(function () use ($parent, $thread, $body): ConversationMessage {
             $participant = $this->ensureParentParticipant($thread, $parent);
 
             return $this->createMessage(
@@ -294,6 +295,10 @@ class ConversationService
                 $participant
             );
         });
+
+        app(ParentConversationWebhookNotifier::class)->notify($message, $parent);
+
+        return $message;
     }
 
     public function postAdminMessage(AdminUser $admin, ConversationThread $thread, string $body): ConversationMessage

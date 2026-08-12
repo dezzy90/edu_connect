@@ -52,6 +52,18 @@ class FixtureEduAdminConnector implements EduAdminConnector
         ];
     }
 
+    public function pushConversationMessage(array $message): array
+    {
+        return [
+            'status' => 'success',
+            'data' => [
+                'created' => true,
+                'communication_message_id' => $message['message_id'] ?? null,
+                'recipients_created' => 1,
+            ],
+        ];
+    }
+
     private function readJson(string $name): array
     {
         $file = rtrim($this->fixturePath, DIRECTORY_SEPARATOR . '/')

@@ -6,6 +6,7 @@ use App\Models\V2\AcademicClass;
 use App\Models\V2\ConversationMessage;
 use App\Models\V2\ConversationParticipant;
 use App\Models\V2\ConversationThread;
+use App\Models\V2\IntegrationConnection;
 use App\Models\V2\MobileNotification;
 use App\Models\V2\ParentAccount;
 use App\Models\V2\ParentStudentLink;
@@ -15,8 +16,11 @@ use App\Models\V2\Stream;
 use App\Models\V2\Student;
 use App\Models\V2\Tenant;
 use App\Services\Conversations\ConversationService;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Tests\Support\V2Schema;
 
 uses(Tests\TestCase::class);
@@ -117,6 +121,70 @@ it('automatically exposes class groups and school channels after child links', f
         ->assertJsonPath('data.thread.type', ConversationThread::TYPE_DIRECT)
         ->assertJsonPath('data.thread.student_id', $studentA->id)
         ->assertJsonPath('data.message.body', 'Who should I contact about pickup?');
+});
+
+it('pushes parent conversation messages back to Edu Admin immediately', function (): void {
+    [$parent, $schoolA, $classA] = createConversationGraph();
+
+    $schoolA->forceFill(['source_system' => 'edu_admin', 'source_id' => '701'])->save();
+    $classA->forceFill(['source_system' => 'edu_admin', 'source_id' => '1701'])->save();
+
+    IntegrationConnection::query()->create([
+        'tenant_id' => $schoolA->tenant_id,
+        'provider' => 'edu_admin',
+        'mode' => 'connected',
+        'base_url' => 'https://edu-admin.test',
+        'status' => 'active',
+        'encrypted_access_token' => Crypt::encryptString('connector-secret'),
+        'webhook_secret' => Crypt::encryptString('connector-webhook-secret'),
+    ]);
+
+    config(['integrations.providers.edu_admin.driver' => 'http']);
+
+    Http::fake([
+        'https://edu-admin.test/api/v1/integrations/edu-connect/conversation-messages' => Http::response([
+            'status' => 'success',
+            'data' => [
+                'created' => true,
+                'communication_message_id' => 9001,
+                'recipients_created' => 1,
+            ],
+        ], 201),
+    ]);
+
+    $thread = app(ConversationService::class)->findOrCreateClassGroup($classA);
+    $token = conversationParentToken($parent);
+    conversationForgetGuards();
+
+    $this->flushHeaders()->withToken($token)
+        ->postJson("/api/mobile/v2/conversations/{$thread->id}/messages", [
+            'body' => 'Please confirm tomorrow pickup time.',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.message.body', 'Please confirm tomorrow pickup time.');
+
+    Http::assertSent(function (Request $request): bool {
+        $timestamp = $request->header('X-Edu-Connect-Timestamp')[0] ?? null;
+        $signature = $request->header('X-Edu-Connect-Signature')[0] ?? null;
+        $body = $request->body();
+        $payload = json_decode($body, true);
+
+        if (!$timestamp || !$signature || !is_array($payload)) {
+            return false;
+        }
+
+        $expectedSignature = 'sha256=' . hash_hmac('sha256', $timestamp . '.' . $body, 'connector-webhook-secret');
+
+        return $request->method() === 'POST'
+            && $request->url() === 'https://edu-admin.test/api/v1/integrations/edu-connect/conversation-messages'
+            && $request->hasHeader('Authorization', 'Bearer connector-secret')
+            && $signature === $expectedSignature
+            && $payload['thread_type'] === ConversationThread::TYPE_CLASS_GROUP
+            && $payload['school_id'] === 701
+            && $payload['class_id'] === 1701
+            && $payload['parent_phone'] === '650000001'
+            && $payload['body'] === 'Please confirm tomorrow pickup time.';
+    });
 });
 
 it('creates default conversation spaces when a parent links a child code', function (): void {
