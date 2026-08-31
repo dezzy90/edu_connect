@@ -8,11 +8,13 @@ use App\Models\V2\ConversationMessageReceipt;
 use App\Models\V2\ConversationThread;
 use App\Models\V2\ParentAccount;
 use App\Models\V2\Student;
+use App\Services\Conversations\ConversationAttachmentService;
 use App\Services\Conversations\ConversationService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\File;
 
 class ConversationController extends Controller
 {
@@ -84,7 +86,7 @@ class ConversationController extends Controller
 
         $message = null;
 
-        if (!empty($validated['body'])) {
+        if (! empty($validated['body'])) {
             $message = $conversations->postParentMessage($this->parent($request), $thread, trim($validated['body']));
         }
 
@@ -109,8 +111,9 @@ class ConversationController extends Controller
         ]);
 
         $messages = ConversationMessage::query()
+            ->with(['attachments', 'replyTo.attachments'])
             ->where('thread_id', $thread->id)
-            ->when(!empty($validated['before_id']), fn (Builder $query) => $query->where('id', '<', (int) $validated['before_id']))
+            ->when(! empty($validated['before_id']), fn (Builder $query) => $query->where('id', '<', (int) $validated['before_id']))
             ->latest('id')
             ->limit((int) ($validated['limit'] ?? 50))
             ->get()
@@ -133,10 +136,28 @@ class ConversationController extends Controller
     public function postMessage(Request $request, ConversationThread $thread, ConversationService $conversations): JsonResponse
     {
         $validated = $request->validate([
-            'body' => ['required', 'string', 'max:5000'],
+            'body' => ['nullable', 'string', 'max:5000', 'required_without:attachment'],
+            'reply_to_message_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('ec_conversation_messages', 'id')->where('thread_id', $thread->id),
+            ],
+            'attachment' => [
+                'nullable',
+                File::types(ConversationAttachmentService::ALLOWED_EXTENSIONS)
+                    ->max(ConversationAttachmentService::MAX_SIZE_KILOBYTES),
+            ],
         ]);
 
-        $message = $conversations->postParentMessage($this->parent($request), $thread, trim($validated['body']));
+        $message = $conversations->postParentMessage(
+            $this->parent($request),
+            $thread,
+            trim((string) ($validated['body'] ?? '')),
+            [
+                'reply_to_message_id' => $validated['reply_to_message_id'] ?? null,
+                'attachment' => $request->file('attachment'),
+            ]
+        );
 
         return response()->json([
             'status' => 'success',
@@ -213,12 +234,20 @@ class ConversationController extends Controller
 
     private function messagePayload(ConversationMessage $message, ParentAccount $parent): array
     {
+        $message->loadMissing(['attachments', 'replyTo.attachments']);
         $ownMessage = $message->sender_type === ConversationMessage::SENDER_PARENT
             && (int) $message->sender_id === (int) $parent->id;
 
         return [
             'id' => $message->id,
             'thread_id' => $message->thread_id,
+            'reply_to_message_id' => $message->reply_to_message_id,
+            'reply_to' => $message->replyTo ? [
+                'id' => $message->replyTo->id,
+                'sender_display_name' => $message->replyTo->sender_display_name,
+                'body' => $message->replyTo->body,
+                'attachment_kind' => $message->replyTo->attachments->first()?->kind,
+            ] : null,
             'sender_type' => $message->sender_type,
             'sender_id' => $message->sender_id,
             'sender_display_name' => $message->sender_display_name,
@@ -227,6 +256,9 @@ class ConversationController extends Controller
             'status' => $message->status,
             'sent_at' => $message->sent_at?->toIso8601String(),
             'own_message' => $ownMessage,
+            'attachments' => $message->attachments
+                ->map(fn ($attachment) => app(ConversationAttachmentService::class)->payload($attachment))
+                ->values(),
         ] + ($ownMessage ? $this->receiptPayload($message, $parent) : []);
     }
 

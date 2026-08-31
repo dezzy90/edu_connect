@@ -75,6 +75,11 @@ it('queues mapped attendance events and marks accepted pushes as synced', functi
                 'rejected' => [],
             ];
         }
+
+        public function pushConversationMessage(array $message): array
+        {
+            return [];
+        }
     };
 
     $pushed = $dispatcher->dispatchPending($connection, $connector);

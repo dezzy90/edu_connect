@@ -7,6 +7,7 @@ use App\Models\V2\AcademicClass;
 use App\Models\V2\AcademicYear;
 use App\Models\V2\EducationOption;
 use App\Models\V2\IntegrationConnection;
+use App\Models\V2\IntegrationMapping;
 use App\Models\V2\IntegrationSyncItem;
 use App\Models\V2\IntegrationSyncRun;
 use App\Models\V2\MobileMessage;
@@ -19,6 +20,7 @@ use App\Models\V2\StudentMobileProfile;
 use App\Models\V2\Tenant;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -192,6 +194,7 @@ class SyncCoordinator
         foreach ($records as $record) {
             if (! is_array($record)) {
                 $stats['failed']++;
+
                 continue;
             }
 
@@ -203,6 +206,89 @@ class SyncCoordinator
             } else {
                 $stats['failed']++;
             }
+        }
+
+        return $stats;
+    }
+
+    public function applyResourceDeletion(IntegrationConnection $connection, string $resource, array $externalIds): array
+    {
+        $externalType = match ($resource) {
+            'schools' => 'school',
+            'academic_years' => 'academic_year',
+            'sections' => 'section',
+            'education_options' => 'education_option',
+            'streams' => 'stream',
+            'classes' => 'class',
+            'students' => 'student',
+            'parent_links' => 'parent_student_link',
+            'mobile_messages' => 'mobile_message',
+            'student_mobile_profiles' => 'student_mobile_profile',
+            default => null,
+        };
+
+        $modelClass = match ($resource) {
+            'schools' => School::class,
+            'academic_years' => AcademicYear::class,
+            'sections' => Section::class,
+            'education_options' => EducationOption::class,
+            'streams' => Stream::class,
+            'classes' => AcademicClass::class,
+            'students' => Student::class,
+            'parent_links' => ParentStudentLink::class,
+            'mobile_messages' => MobileMessage::class,
+            'student_mobile_profiles' => StudentMobileProfile::class,
+            default => null,
+        };
+
+        $stats = ['requested' => count($externalIds), 'deleted' => 0, 'missing' => 0];
+
+        if (! $externalType || ! $modelClass) {
+            return $stats;
+        }
+
+        foreach ($externalIds as $externalId) {
+            $mapping = IntegrationMapping::query()
+                ->where('connection_id', $connection->id)
+                ->where('external_type', $externalType)
+                ->where('external_id', (string) $externalId)
+                ->first();
+
+            if (! $mapping) {
+                $stats['missing']++;
+
+                continue;
+            }
+
+            $query = $modelClass::query();
+
+            if (in_array(SoftDeletes::class, class_uses_recursive($modelClass), true)) {
+                $query->withTrashed();
+            }
+
+            /** @var Model|null $model */
+            $model = $query->find($mapping->local_id);
+
+            if (! $model) {
+                $stats['missing']++;
+
+                continue;
+            }
+
+            $attributes = match ($resource) {
+                'schools', 'academic_years', 'sections', 'education_options', 'streams', 'classes' => ['status' => 'inactive'],
+                'students' => ['status' => 'inactive', 'mobile_visible' => false],
+                'parent_links' => ['status' => 'revoked'],
+                'mobile_messages' => ['status' => 'archived'],
+                default => [],
+            };
+
+            if ($attributes !== []) {
+                $model->forceFill($attributes)->save();
+            }
+
+            $model->delete();
+            $stats['deleted']++;
         }
 
         return $stats;
@@ -286,7 +372,7 @@ class SyncCoordinator
 
     private function upsertSchool(IntegrationConnection $connection, array $record): School
     {
-        $school = School::query()->updateOrCreate(
+        $school = School::withTrashed()->updateOrCreate(
             $this->sourceKey($record),
             [
                 'tenant_id' => $connection->tenant_id,
@@ -305,6 +391,8 @@ class SyncCoordinator
             ]
         );
 
+        $this->restore($school);
+
         $this->map($connection, 'school', $school, $record);
 
         return $school;
@@ -314,7 +402,7 @@ class SyncCoordinator
     {
         $schoolId = $this->localId($connection, 'school', $record['school_id'] ?? null);
 
-        $academicYear = AcademicYear::query()->updateOrCreate(
+        $academicYear = AcademicYear::withTrashed()->updateOrCreate(
             $this->sourceKey($record),
             [
                 'tenant_id' => $connection->tenant_id,
@@ -327,6 +415,8 @@ class SyncCoordinator
                 'source_updated_at' => $this->date($record['updated_at'] ?? null),
             ]
         );
+
+        $this->restore($academicYear);
 
         $this->map($connection, 'academic_year', $academicYear, $record);
 
@@ -341,7 +431,7 @@ class SyncCoordinator
             return null;
         }
 
-        $section = Section::query()->updateOrCreate(
+        $section = Section::withTrashed()->updateOrCreate(
             $this->sourceKey($record),
             [
                 'tenant_id' => $connection->tenant_id,
@@ -353,6 +443,8 @@ class SyncCoordinator
                 'source_updated_at' => $this->date($record['updated_at'] ?? null),
             ]
         );
+
+        $this->restore($section);
 
         $this->map($connection, 'section', $section, $record);
 
@@ -368,7 +460,7 @@ class SyncCoordinator
             return null;
         }
 
-        $option = EducationOption::query()->updateOrCreate(
+        $option = EducationOption::withTrashed()->updateOrCreate(
             $this->sourceKey($record),
             [
                 'tenant_id' => $connection->tenant_id,
@@ -381,6 +473,8 @@ class SyncCoordinator
                 'source_updated_at' => $this->date($record['updated_at'] ?? null),
             ]
         );
+
+        $this->restore($option);
 
         $this->map($connection, 'education_option', $option, $record);
 
@@ -397,7 +491,7 @@ class SyncCoordinator
             return null;
         }
 
-        $stream = Stream::query()->updateOrCreate(
+        $stream = Stream::withTrashed()->updateOrCreate(
             $this->sourceKey($record),
             [
                 'tenant_id' => $connection->tenant_id,
@@ -413,6 +507,8 @@ class SyncCoordinator
             ]
         );
 
+        $this->restore($stream);
+
         $this->map($connection, 'stream', $stream, $record);
 
         return $stream;
@@ -427,7 +523,7 @@ class SyncCoordinator
             return null;
         }
 
-        $class = AcademicClass::query()->updateOrCreate(
+        $class = AcademicClass::withTrashed()->updateOrCreate(
             $this->sourceKey($record),
             [
                 'tenant_id' => $connection->tenant_id,
@@ -444,6 +540,8 @@ class SyncCoordinator
             ]
         );
 
+        $this->restore($class);
+
         $this->map($connection, 'class', $class, $record);
 
         return $class;
@@ -458,7 +556,7 @@ class SyncCoordinator
             return null;
         }
 
-        $student = Student::query()->updateOrCreate(
+        $student = Student::withTrashed()->updateOrCreate(
             $this->sourceKey($record),
             [
                 'tenant_id' => $connection->tenant_id,
@@ -485,6 +583,8 @@ class SyncCoordinator
             ]
         );
 
+        $this->restore($student);
+
         $this->map($connection, 'student', $student, $record);
 
         return $student;
@@ -508,7 +608,7 @@ class SyncCoordinator
                 ? 'active'
                 : $incomingStatus;
 
-        $link = ParentStudentLink::query()->updateOrCreate(
+        $link = ParentStudentLink::withTrashed()->updateOrCreate(
             $sourceKey,
             [
                 'tenant_id' => $connection->tenant_id,
@@ -529,6 +629,8 @@ class SyncCoordinator
                 'source_updated_at' => $this->date($record['updated_at'] ?? null),
             ]
         );
+
+        $this->restore($link);
 
         $this->map($connection, 'parent_student_link', $link, $record);
 
@@ -558,6 +660,13 @@ class SyncCoordinator
                 'body' => $record['body'],
                 'audience_type' => $this->mobileMessageAudienceType((string) ($record['audience_type'] ?? 'parents')),
                 'audience_filters' => $this->localAudienceFilters($connection, $record),
+                'metadata' => [
+                    'reply_to' => $record['reply_to'] ?? null,
+                    'reply_to_source_id' => $record['reply_to_source_id'] ?? null,
+                    'attachments' => is_array($record['attachments'] ?? null)
+                        ? $record['attachments']
+                        : [],
+                ],
                 'status' => $this->mobileMessageStatus((string) ($record['status'] ?? 'draft')),
                 'published_at' => $this->date($record['published_at'] ?? $record['sent_at'] ?? null),
                 'expires_at' => $this->date($record['expires_at'] ?? null),
@@ -617,6 +726,13 @@ class SyncCoordinator
             'source_system' => self::SOURCE,
             'source_id' => (string) $record['id'],
         ];
+    }
+
+    private function restore(Model $model): void
+    {
+        if (method_exists($model, 'trashed') && $model->trashed()) {
+            $model->restore();
+        }
     }
 
     private function map(IntegrationConnection $connection, string $type, Model $model, array $record): void

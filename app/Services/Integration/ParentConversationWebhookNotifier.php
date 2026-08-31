@@ -6,6 +6,7 @@ use App\Models\V2\ConversationMessage;
 use App\Models\V2\ConversationThread;
 use App\Models\V2\IntegrationConnection;
 use App\Models\V2\ParentAccount;
+use App\Services\Conversations\ConversationAttachmentService;
 use Illuminate\Database\Eloquent\Model;
 use Throwable;
 
@@ -14,22 +15,27 @@ class ParentConversationWebhookNotifier
     public function __construct(
         private readonly EduAdminConnectorFactory $connectors,
         private readonly IntegrationAuditLogger $audit,
-    ) {
-    }
+    ) {}
 
     public function notify(ConversationMessage $message, ParentAccount $parent): void
     {
-        $message->loadMissing(['thread.school', 'thread.class', 'thread.student']);
+        $message->loadMissing([
+            'thread.school',
+            'thread.class',
+            'thread.student',
+            'attachments',
+            'replyTo.attachments',
+        ]);
 
         $thread = $message->thread;
 
-        if (!$thread instanceof ConversationThread) {
+        if (! $thread instanceof ConversationThread) {
             return;
         }
 
         $payload = $this->payload($message, $thread, $parent);
 
-        if (!$payload) {
+        if (! $payload) {
             return;
         }
 
@@ -72,7 +78,7 @@ class ParentConversationWebhookNotifier
                         $connection,
                         'messages',
                         'messages.parent_conversation.push_failed',
-                        'Parent conversation message could not be pushed to Edu-admin: ' . $exception->getMessage(),
+                        'Parent conversation message could not be pushed to Edu-admin: '.$exception->getMessage(),
                         [
                             'conversation_message_id' => $message->id,
                             'conversation_thread_id' => $message->thread_id,
@@ -90,7 +96,7 @@ class ParentConversationWebhookNotifier
     {
         $schoolId = $this->externalId($thread->school);
 
-        if (!$schoolId) {
+        if (! $schoolId) {
             return null;
         }
 
@@ -106,13 +112,25 @@ class ParentConversationWebhookNotifier
             'parent_name' => $parent->full_name ?: $parent->phone,
             'parent_phone' => $parent->phone,
             'body' => $message->body,
+            'reply_to_message_id' => $message->reply_to_message_id ? (string) $message->reply_to_message_id : null,
+            'reply_to' => $message->replyTo ? [
+                'message_id' => (string) $message->replyTo->id,
+                'source_id' => data_get($message->replyTo->metadata, 'mobile_message_source_id'),
+                'sender_name' => $message->replyTo->sender_display_name,
+                'body' => $message->replyTo->body,
+                'attachment_kind' => $message->replyTo->attachments->first()?->kind,
+            ] : null,
+            'attachments' => $message->attachments
+                ->map(fn ($attachment) => app(ConversationAttachmentService::class)->payload($attachment, true))
+                ->values()
+                ->all(),
             'sent_at' => $message->sent_at?->toIso8601String() ?: now()->toIso8601String(),
         ], fn ($value) => $value !== null && $value !== '');
     }
 
     private function externalId(?Model $model): ?int
     {
-        if (!$model || blank($model->source_id ?? null)) {
+        if (! $model || blank($model->source_id ?? null)) {
             return null;
         }
 

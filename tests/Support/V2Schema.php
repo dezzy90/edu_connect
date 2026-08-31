@@ -20,6 +20,8 @@ class V2Schema
         'database/migrations/2026_08_07_000009_add_provider_response_to_ec_notification_deliveries_table.php',
         'database/migrations/2026_08_08_000012_relax_parent_link_phone_uniqueness.php',
         'database/migrations/2026_08_09_000013_create_ec_student_mobile_profiles_table.php',
+        'database/migrations/2026_08_29_000014_add_rich_conversation_messages.php',
+        'database/migrations/2026_08_30_000015_add_automatic_edu_admin_provisioning.php',
     ];
 
     public static function migrate(): void

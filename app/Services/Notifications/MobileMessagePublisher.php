@@ -2,17 +2,17 @@
 
 namespace App\Services\Notifications;
 
+use App\Models\V2\AcademicClass;
+use App\Models\V2\ConversationMessage;
+use App\Models\V2\ConversationThread;
 use App\Models\V2\MobileMessage;
 use App\Models\V2\MobileMessageRecipient;
 use App\Models\V2\MobileNotification;
 use App\Models\V2\NotificationPreference;
 use App\Models\V2\ParentAccount;
 use App\Models\V2\ParentStudentLink;
-use App\Models\V2\Student;
-use App\Models\V2\AcademicClass;
-use App\Models\V2\ConversationMessage;
-use App\Models\V2\ConversationThread;
 use App\Models\V2\School;
+use App\Models\V2\Student;
 use App\Services\Conversations\ConversationService;
 use App\Services\Realtime\MobileRealtimeBroadcaster;
 use Illuminate\Database\Eloquent\Builder;
@@ -322,6 +322,20 @@ class MobileMessagePublisher
                 continue;
             }
 
+            $sourceMetadata = is_array($message->metadata) ? $message->metadata : [];
+            $replySourceId = (int) (
+                $sourceMetadata['reply_to_source_id']
+                ?? data_get($sourceMetadata, 'reply_to.source_id')
+                ?? 0
+            );
+            $replyToMessageId = $replySourceId > 0
+                ? ConversationMessage::query()
+                    ->where('thread_id', $thread->id)
+                    ->where('metadata->source', 'official_mobile_message')
+                    ->where('metadata->mobile_message_source_id', $replySourceId)
+                    ->value('id')
+                : null;
+
             $this->conversations->postSystemMessage(
                 $thread,
                 $this->conversationBody($message),
@@ -333,7 +347,12 @@ class MobileMessagePublisher
                     'mobile_message_source_id' => $message->source_id,
                     'category' => $message->category,
                     'priority' => $message->priority,
-                ]
+                    'source_reply' => $sourceMetadata['reply_to'] ?? null,
+                ],
+                $replyToMessageId ? (int) $replyToMessageId : null,
+                is_array($sourceMetadata['attachments'] ?? null)
+                    ? $sourceMetadata['attachments']
+                    : []
             );
         }
 

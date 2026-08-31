@@ -3,12 +3,17 @@
 use App\Http\Controllers\Api\V2\Mobile\AuthController;
 use App\Http\Controllers\Api\V2\Mobile\ConfigController;
 use App\Http\Controllers\Api\V2\Mobile\ConversationController;
+use App\Http\Controllers\Api\V2\Mobile\ConversationAttachmentController;
 use App\Http\Controllers\Api\V2\Mobile\MessageController;
 use App\Http\Controllers\Api\V2\Mobile\NotificationController;
 use App\Http\Controllers\Api\V2\Mobile\PushTokenController;
 use App\Http\Controllers\Api\V2\Mobile\RealtimeController;
 use App\Http\Controllers\Api\V2\Mobile\StudentController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/mobile/v2/conversation-attachments/{attachment}/transfer', [ConversationAttachmentController::class, 'transfer'])
+    ->middleware(['signed', 'throttle:120,1'])
+    ->name('conversation-attachments.transfer');
 
 Route::prefix('mobile/v2')
     ->name('api.mobile.v2.')
@@ -41,6 +46,8 @@ Route::prefix('mobile/v2')
             Route::get('/conversations/{thread}', [ConversationController::class, 'show'])->name('conversations.show');
             Route::post('/conversations/{thread}/messages', [ConversationController::class, 'postMessage'])->name('conversations.messages.store');
             Route::post('/conversations/{thread}/read', [ConversationController::class, 'markRead'])->name('conversations.read');
+            Route::get('/conversation-attachments/{attachment}', [ConversationAttachmentController::class, 'show'])
+                ->name('conversation-attachments.show');
 
             Route::post('/push-tokens', [PushTokenController::class, 'store'])->name('push-tokens.store');
             Route::delete('/push-tokens', [PushTokenController::class, 'destroy'])->name('push-tokens.destroy');

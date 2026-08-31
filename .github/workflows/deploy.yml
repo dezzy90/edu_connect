@@ -1,10 +1,18 @@
-name: Deploy edu-connect
+name: Deploy EduConnect production
 
 on:
   push:
     branches:
-      - main
+      - production
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type DEPLOY to release the current production branch.
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
   group: edu-connect-production
@@ -12,44 +20,52 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build and deploy to cPanel
+    name: Build and deploy production API
+    if: github.event_name == 'push' || inputs.confirm == 'DEPLOY'
     runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://edu-connect-api.queevo.tech
 
     env:
-      CPANEL_HOST: 192.185.48.217
-      CPANEL_PORT: 2222
-      CPANEL_USER: ghvcamer
-      BACKEND_DIR: /home4/ghvcamer/public_html/website_9d3cb424
-      FRONTEND_DIR: /home4/ghvcamer/public_html/website_7e98303a
-      PHP_BIN: /opt/cpanel/ea-php82/root/usr/bin/php
-      FRONTEND_API_URL: https://rod-api.ghvcameroon.com/api
+      CPANEL_HOST: 31.22.4.112
+      CPANEL_PORT: 1394
+      CPANEL_USER: queevote
+      BACKEND_DIR: /home/queevote/edu-connect-api.queevo.tech
+      PHP_BIN: /opt/alt/php82/usr/bin/php
 
     steps:
-      - name: Checkout
+      - name: Checkout production release
         uses: actions/checkout@v4
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-          tools: composer:v2
+      - name: Verify PHP and Composer
+        run: |
+          php -v
+          composer --version
+          php -r 'exit(version_compare(PHP_VERSION, "8.2.0", ">=") ? 0 : 1);'
 
       - name: Install backend dependencies
-        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
+          COMPOSER_MAX_PARALLEL_HTTP: 2
         run: |
-          npm --prefix frontend ci
-          VITE_API_URL="$FRONTEND_API_URL" npm --prefix frontend run build
+          composer config --global --auth github-oauth.github.com "$GITHUB_TOKEN"
 
-      - name: Configure SSH
+          retry() {
+            for attempt in 1 2 3 4 5; do
+              "$@" && return 0
+              status=$?
+              echo "Attempt $attempt failed with exit code $status. Retrying..."
+              sleep $((attempt * 30))
+            done
+            return $status
+          }
+
+          retry composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress \
+            || retry composer install --no-dev --no-interaction --prefer-source --optimize-autoloader --no-progress
+
+      - name: Configure production SSH
         env:
           CPANEL_SSH_KEY_B64: ${{ secrets.CPANEL_SSH_KEY_B64 }}
         run: |
@@ -58,7 +74,6 @@ jobs:
             echo "CPANEL_SSH_KEY_B64 is empty or missing."
             exit 1
           fi
-          echo "CPANEL_SSH_KEY_B64 length: ${#CPANEL_SSH_KEY_B64}"
           printf '%s' "$CPANEL_SSH_KEY_B64" | tr -d '\r\n ' | base64 -d > "$HOME/.ssh/cpanel_key"
           chmod 600 "$HOME/.ssh/cpanel_key"
           ssh-keygen -y -f "$HOME/.ssh/cpanel_key" > "$HOME/.ssh/cpanel_key.pub"
@@ -78,7 +93,7 @@ jobs:
             return $status
           }
 
-          retry ssh $SSH_OPTS "$SSH_TARGET" "mkdir -p '$BACKEND_DIR' '$FRONTEND_DIR' '$BACKEND_DIR/bootstrap/cache' '$BACKEND_DIR/storage/framework/cache/data' '$BACKEND_DIR/storage/framework/sessions' '$BACKEND_DIR/storage/framework/views' '$BACKEND_DIR/storage/logs'"
+          retry ssh $SSH_OPTS "$SSH_TARGET" "mkdir -p '$BACKEND_DIR' '$BACKEND_DIR/bootstrap/cache' '$BACKEND_DIR/storage/app/private' '$BACKEND_DIR/storage/app/public' '$BACKEND_DIR/storage/framework/cache/data' '$BACKEND_DIR/storage/framework/sessions' '$BACKEND_DIR/storage/framework/testing' '$BACKEND_DIR/storage/framework/views' '$BACKEND_DIR/storage/logs'"
 
       - name: Deploy backend runtime
         run: |
@@ -95,6 +110,10 @@ jobs:
           retry rsync -az --delete \
             --exclude='.env' \
             --exclude='.env.*' \
+            --exclude='.user.ini' \
+            --exclude='php.ini' \
+            --exclude='.well-known/' \
+            --exclude='cgi-bin/' \
             --exclude='.git/' \
             --exclude='.github/' \
             --exclude='deploy/' \
@@ -126,21 +145,6 @@ jobs:
           retry rsync -az -e "ssh $SSH_OPTS" deployment/cpanel/backend-direct-index.php "$SSH_TARGET:$BACKEND_DIR/index.php"
           retry rsync -az -e "ssh $SSH_OPTS" deployment/cpanel/backend-direct.htaccess "$SSH_TARGET:$BACKEND_DIR/.htaccess"
 
-      - name: Deploy frontend dist
-        run: |
-          retry() {
-            for attempt in 1 2 3 4 5; do
-              "$@" && return 0
-              status=$?
-              echo "Attempt $attempt failed with exit code $status. Retrying..."
-              sleep $((attempt * 15))
-            done
-            return $status
-          }
-
-          retry rsync -az --delete -e "ssh $SSH_OPTS" frontend/dist/ "$SSH_TARGET:$FRONTEND_DIR/"
-          retry rsync -az -e "ssh $SSH_OPTS" deployment/cpanel/frontend.htaccess "$SSH_TARGET:$FRONTEND_DIR/.htaccess"
-
       - name: Finalize Laravel
         run: |
           retry() {
@@ -153,4 +157,4 @@ jobs:
             return $status
           }
 
-          retry ssh $SSH_OPTS "$SSH_TARGET" "cd '$BACKEND_DIR' && chmod -R u+rwX bootstrap/cache storage && '$PHP_BIN' artisan optimize:clear && '$PHP_BIN' artisan migrate --force && '$PHP_BIN' artisan optimize"
+          retry ssh $SSH_OPTS "$SSH_TARGET" "cd '$BACKEND_DIR' && test -s .env && chmod -R u+rwX bootstrap/cache storage && CACHE_STORE=file '$PHP_BIN' artisan optimize:clear && '$PHP_BIN' artisan migrate --force && '$PHP_BIN' artisan optimize && '$PHP_BIN' artisan educonnect:realtime-check && '$PHP_BIN' artisan educonnect:push-check"

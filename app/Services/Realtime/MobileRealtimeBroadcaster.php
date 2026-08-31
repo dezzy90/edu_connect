@@ -11,6 +11,7 @@ use App\Models\V2\MobileMessageRecipient;
 use App\Models\V2\MobileNotification;
 use App\Models\V2\ParentAccount;
 use App\Models\V2\ParentStudentLink;
+use App\Services\Conversations\ConversationAttachmentService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -156,6 +157,7 @@ class MobileRealtimeBroadcaster
     public function conversationMessageCreated(ConversationThread $thread, ConversationMessage $message): void
     {
         $thread->loadMissing(['school', 'class', 'student']);
+        $message->loadMissing(['attachments', 'replyTo.attachments']);
 
         $channels = collect([
             "conversation.{$thread->id}",
@@ -189,6 +191,13 @@ class MobileRealtimeBroadcaster
             'message' => [
                 'id' => $message->id,
                 'thread_id' => $message->thread_id,
+                'reply_to_message_id' => $message->reply_to_message_id,
+                'reply_to' => $message->replyTo ? [
+                    'id' => $message->replyTo->id,
+                    'sender_display_name' => $message->replyTo->sender_display_name,
+                    'body' => $message->replyTo->body,
+                    'attachment_kind' => $message->replyTo->attachments->first()?->kind,
+                ] : null,
                 'sender_type' => $message->sender_type,
                 'sender_id' => $message->sender_id,
                 'sender_display_name' => $message->sender_display_name,
@@ -196,6 +205,10 @@ class MobileRealtimeBroadcaster
                 'body' => $message->body,
                 'status' => $message->status,
                 'sent_at' => $message->sent_at?->toIso8601String(),
+                'attachments' => $message->attachments
+                    ->map(fn ($attachment) => app(ConversationAttachmentService::class)->payload($attachment))
+                    ->values()
+                    ->all(),
             ],
         ]);
     }

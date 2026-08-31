@@ -11,6 +11,18 @@ return [
         ],
     ],
 
+    'provisioning' => [
+        'edu_admin' => [
+            'secret' => env('EDU_ADMIN_PROVISIONING_SECRET'),
+            'signature_tolerance_seconds' => (int) env('EDU_ADMIN_PROVISIONING_SIGNATURE_TOLERANCE', 300),
+            'allowed_base_urls' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('EDU_ADMIN_ALLOWED_BASE_URLS', ''))
+            ))),
+            'queue' => env('EDU_ADMIN_PROVISIONING_QUEUE', env('EDUCONNECT_SCHEDULER_QUEUE', 'edu-connect')),
+        ],
+    ],
+
     'feature_defaults' => [
         'standalone' => [
             'attendance' => true,

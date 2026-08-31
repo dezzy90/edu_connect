@@ -12,7 +12,9 @@ class ConversationMessage extends Model
     use SoftDeletes;
 
     public const SENDER_PARENT = 'parent_account';
+
     public const SENDER_ADMIN = 'admin_user';
+
     public const SENDER_SYSTEM = 'system';
 
     protected $table = 'ec_conversation_messages';
@@ -33,5 +35,15 @@ class ConversationMessage extends Model
     public function receipts(): HasMany
     {
         return $this->hasMany(ConversationMessageReceipt::class, 'message_id');
+    }
+
+    public function replyTo(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reply_to_message_id');
+    }
+
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(ConversationMessageAttachment::class, 'message_id');
     }
 }

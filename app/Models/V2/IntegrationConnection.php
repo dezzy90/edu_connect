@@ -23,6 +23,7 @@ class IntegrationConnection extends Model
     protected $casts = [
         'scopes' => 'array',
         'feature_flags' => 'array',
+        'enabled_school_ids' => 'array',
         'last_successful_sync_at' => 'datetime',
         'last_failed_sync_at' => 'datetime',
     ];

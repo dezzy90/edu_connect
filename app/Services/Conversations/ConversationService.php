@@ -14,9 +14,10 @@ use App\Models\V2\ParentAccount;
 use App\Models\V2\ParentStudentLink;
 use App\Models\V2\School;
 use App\Models\V2\Student;
-use App\Services\Realtime\MobileRealtimeBroadcaster;
 use App\Services\Integration\ParentConversationWebhookNotifier;
+use App\Services\Realtime\MobileRealtimeBroadcaster;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -30,7 +31,10 @@ class ConversationService
         'discipline' => 'Discipline office',
     ];
 
-    public function __construct(private readonly MobileRealtimeBroadcaster $realtime) {}
+    public function __construct(
+        private readonly MobileRealtimeBroadcaster $realtime,
+        private readonly ConversationAttachmentService $attachments,
+    ) {}
 
     public function scopeVisibleToParent(Builder $query, ParentAccount $parent): void
     {
@@ -279,11 +283,16 @@ class ConversationService
         return $thread->refresh();
     }
 
-    public function postParentMessage(ParentAccount $parent, ConversationThread $thread, string $body): ConversationMessage
-    {
+    public function postParentMessage(
+        ParentAccount $parent,
+        ConversationThread $thread,
+        string $body,
+        array $options = []
+    ): ConversationMessage {
         $this->ensureParentCanPost($parent, $thread);
+        $replyToMessageId = $this->replyMessageId($thread, $options['reply_to_message_id'] ?? null);
 
-        $message = DB::transaction(function () use ($parent, $thread, $body): ConversationMessage {
+        $message = DB::transaction(function () use ($parent, $thread, $body, $options, $replyToMessageId): ConversationMessage {
             $participant = $this->ensureParentParticipant($thread, $parent);
 
             return $this->createMessage(
@@ -292,7 +301,10 @@ class ConversationService
                 $parent->id,
                 $parent->full_name ?: $parent->phone,
                 $body,
-                $participant
+                $participant,
+                [],
+                $replyToMessageId,
+                $options['attachment'] ?? null
             );
         });
 
@@ -301,15 +313,21 @@ class ConversationService
         return $message;
     }
 
-    public function postAdminMessage(AdminUser $admin, ConversationThread $thread, string $body): ConversationMessage
-    {
+    public function postAdminMessage(
+        AdminUser $admin,
+        ConversationThread $thread,
+        string $body,
+        array $options = []
+    ): ConversationMessage {
         $this->ensureAdminCanAccessThread($admin, $thread);
 
         if ($thread->status !== 'open') {
             abort(403, 'This conversation is closed.');
         }
 
-        return DB::transaction(function () use ($admin, $thread, $body): ConversationMessage {
+        $replyToMessageId = $this->replyMessageId($thread, $options['reply_to_message_id'] ?? null);
+
+        return DB::transaction(function () use ($admin, $thread, $body, $options, $replyToMessageId): ConversationMessage {
             $participant = $this->ensureAdminParticipant($thread, $admin);
 
             if (in_array($thread->type, [ConversationThread::TYPE_CLASS_GROUP, ConversationThread::TYPE_SCHOOL_CHANNEL], true)) {
@@ -322,7 +340,10 @@ class ConversationService
                 $admin->id,
                 $admin->name,
                 $body,
-                $participant
+                $participant,
+                [],
+                $replyToMessageId,
+                $options['attachment'] ?? null
             );
         });
     }
@@ -331,13 +352,17 @@ class ConversationService
         ConversationThread $thread,
         string $body,
         string $senderDisplayName = 'EduConnect',
-        array $metadata = []
+        array $metadata = [],
+        ?int $replyToMessageId = null,
+        array $remoteAttachments = []
     ): ConversationMessage {
         if ($thread->status !== 'open') {
             abort(403, 'This conversation is closed.');
         }
 
-        return DB::transaction(function () use ($thread, $body, $senderDisplayName, $metadata): ConversationMessage {
+        $replyToMessageId = $this->replyMessageId($thread, $replyToMessageId);
+
+        return DB::transaction(function () use ($thread, $body, $senderDisplayName, $metadata, $replyToMessageId, $remoteAttachments): ConversationMessage {
             if (in_array($thread->type, [ConversationThread::TYPE_CLASS_GROUP, ConversationThread::TYPE_SCHOOL_CHANNEL], true)) {
                 $this->syncParentParticipants($thread);
                 $this->syncAdminParticipants($thread);
@@ -352,7 +377,10 @@ class ConversationService
                 $senderDisplayName,
                 $body,
                 $participant,
-                $metadata
+                $metadata,
+                $replyToMessageId,
+                null,
+                $remoteAttachments
             );
         });
     }
@@ -595,10 +623,14 @@ class ConversationService
         string $senderDisplayName,
         string $body,
         ConversationParticipant $senderParticipant,
-        array $metadata = []
+        array $metadata = [],
+        ?int $replyToMessageId = null,
+        ?UploadedFile $attachment = null,
+        array $remoteAttachments = []
     ): ConversationMessage {
         $message = ConversationMessage::query()->create([
             'thread_id' => $thread->id,
+            'reply_to_message_id' => $replyToMessageId,
             'sender_type' => $senderType,
             'sender_id' => $senderId,
             'sender_display_name' => $senderDisplayName,
@@ -609,12 +641,48 @@ class ConversationService
             'metadata' => $metadata ?: null,
         ]);
 
+        if ($attachment instanceof UploadedFile) {
+            $this->attachments->storeUploaded($attachment, $message);
+        }
+
+        foreach ($remoteAttachments as $remoteAttachment) {
+            if (is_array($remoteAttachment)) {
+                $this->attachments->ingestRemote($remoteAttachment, $message);
+            }
+        }
+
+        $message->load(['attachments', 'replyTo']);
+        if ($message->attachments->isNotEmpty()) {
+            $message->forceFill([
+                'message_type' => trim($body) === ''
+                    ? $message->attachments->first()->kind
+                    : 'mixed',
+            ])->saveQuietly();
+        }
+
         $thread->forceFill(['last_message_at' => $message->sent_at])->save();
         $this->createReceipts($thread, $message, $senderParticipant);
         $this->notifyParentParticipants($thread->refresh(), $message, $senderType, $senderId);
         $this->realtime->conversationMessageCreated($thread->refresh(), $message);
 
         return $message->refresh();
+    }
+
+    private function replyMessageId(ConversationThread $thread, mixed $replyToMessageId): ?int
+    {
+        $replyId = filter_var($replyToMessageId, FILTER_VALIDATE_INT);
+        if ($replyId === false || $replyId <= 0) {
+            return null;
+        }
+
+        $exists = ConversationMessage::query()
+            ->where('thread_id', $thread->id)
+            ->whereKey($replyId)
+            ->exists();
+
+        abort_unless($exists, 422, 'The replied-to message does not belong to this conversation.');
+
+        return $replyId;
     }
 
     private function createReceipts(
@@ -677,7 +745,9 @@ class ConversationService
                     'title' => $thread->title,
                     'body' => in_array(config('educonnect.notifications.privacy_mode', 'preview'), ['hidden', 'private'], true)
                         ? 'You have a new conversation message.'
-                        : (string) $message->body,
+                        : (trim((string) $message->body) !== ''
+                            ? (string) $message->body
+                            : $this->attachments->messageFallback($message->loadMissing('attachments'))),
                     'data' => [
                         'conversation_thread_id' => $thread->id,
                         'conversation_message_id' => $message->id,

@@ -48,6 +48,7 @@ class MobileMessage extends Model
 
     protected $casts = [
         'audience_filters' => 'array',
+        'metadata' => 'array',
         'published_at' => 'datetime',
         'expires_at' => 'datetime',
         'source_updated_at' => 'datetime',
@@ -115,7 +116,7 @@ class MobileMessage extends Model
 
     public static function hasStaffOnlyText(?string $title, ?string $body): bool
     {
-        $text = strtolower(trim((string) $title . ' ' . (string) $body));
+        $text = strtolower(trim((string) $title.' '.(string) $body));
 
         foreach (self::STAFF_ONLY_TEXT_PATTERNS as $pattern) {
             if (str_contains($text, $pattern)) {

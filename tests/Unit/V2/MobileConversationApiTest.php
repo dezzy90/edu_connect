@@ -17,10 +17,12 @@ use App\Models\V2\Student;
 use App\Models\V2\Tenant;
 use App\Services\Conversations\ConversationService;
 use Illuminate\Http\Client\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Tests\Support\V2Schema;
 
 uses(Tests\TestCase::class);
@@ -152,16 +154,31 @@ it('pushes parent conversation messages back to Edu Admin immediately', function
         ], 201),
     ]);
 
-    $thread = app(ConversationService::class)->findOrCreateClassGroup($classA);
+    Storage::fake('local');
+    $conversations = app(ConversationService::class);
+    $thread = $conversations->findOrCreateClassGroup($classA);
+    $officialMessage = $conversations->postSystemMessage(
+        $thread,
+        'The school gate closes at 8:00 AM.',
+        'School administration',
+        [
+            'source' => 'official_mobile_message',
+            'mobile_message_source_id' => '4401',
+        ]
+    );
     $token = conversationParentToken($parent);
     conversationForgetGuards();
 
-    $this->flushHeaders()->withToken($token)
-        ->postJson("/api/mobile/v2/conversations/{$thread->id}/messages", [
+    $this->flushHeaders()->withToken($token)->withHeader('Accept', 'application/json')
+        ->post("/api/mobile/v2/conversations/{$thread->id}/messages", [
             'body' => 'Please confirm tomorrow pickup time.',
+            'reply_to_message_id' => $officialMessage->id,
+            'attachment' => UploadedFile::fake()->createWithContent('permission.pdf', '%PDF-1.4 parent note'),
         ])
         ->assertCreated()
-        ->assertJsonPath('data.message.body', 'Please confirm tomorrow pickup time.');
+        ->assertJsonPath('data.message.body', 'Please confirm tomorrow pickup time.')
+        ->assertJsonPath('data.message.reply_to.id', $officialMessage->id)
+        ->assertJsonPath('data.message.attachments.0.kind', 'document');
 
     Http::assertSent(function (Request $request): bool {
         $timestamp = $request->header('X-Edu-Connect-Timestamp')[0] ?? null;
@@ -169,11 +186,11 @@ it('pushes parent conversation messages back to Edu Admin immediately', function
         $body = $request->body();
         $payload = json_decode($body, true);
 
-        if (!$timestamp || !$signature || !is_array($payload)) {
+        if (! $timestamp || ! $signature || ! is_array($payload)) {
             return false;
         }
 
-        $expectedSignature = 'sha256=' . hash_hmac('sha256', $timestamp . '.' . $body, 'connector-webhook-secret');
+        $expectedSignature = 'sha256='.hash_hmac('sha256', $timestamp.'.'.$body, 'connector-webhook-secret');
 
         return $request->method() === 'POST'
             && $request->url() === 'https://edu-admin.test/api/v1/integrations/edu-connect/conversation-messages'
@@ -183,8 +200,50 @@ it('pushes parent conversation messages back to Edu Admin immediately', function
             && $payload['school_id'] === 701
             && $payload['class_id'] === 1701
             && $payload['parent_phone'] === '650000001'
-            && $payload['body'] === 'Please confirm tomorrow pickup time.';
+            && $payload['body'] === 'Please confirm tomorrow pickup time.'
+            && $payload['reply_to']['source_id'] === '4401'
+            && $payload['attachments'][0]['kind'] === 'document'
+            && str_contains($payload['attachments'][0]['transfer_url'], '/api/mobile/v2/conversation-attachments/');
     });
+});
+
+it('supports private rich conversation attachments and replies with a 15 MB limit', function (): void {
+    [$parent, , $class] = createConversationGraph();
+    Storage::fake('local');
+
+    $thread = app(ConversationService::class)->findOrCreateClassGroup($class);
+    $token = conversationParentToken($parent);
+    conversationForgetGuards();
+
+    $originalResponse = $this->flushHeaders()->withToken($token)
+        ->postJson("/api/mobile/v2/conversations/{$thread->id}/messages", [
+            'body' => 'Here is the signed form.',
+        ])
+        ->assertCreated();
+    $originalId = (int) $originalResponse->json('data.message.id');
+
+    $reply = $this->flushHeaders()->withToken($token)
+        ->post("/api/mobile/v2/conversations/{$thread->id}/messages", [
+            'reply_to_message_id' => $originalId,
+            'attachment' => UploadedFile::fake()->createWithContent('signed-form.pdf', '%PDF-1.4 signed form'),
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.message.reply_to.id', $originalId)
+        ->assertJsonPath('data.message.attachments.0.kind', 'document')
+        ->assertJsonPath('data.message.body', '');
+
+    $attachmentId = (int) $reply->json('data.message.attachments.0.id');
+    $this->flushHeaders()->withToken($token)
+        ->get("/api/mobile/v2/conversation-attachments/{$attachmentId}")
+        ->assertOk()
+        ->assertHeader('X-Content-Type-Options', 'nosniff');
+
+    $this->flushHeaders()->withToken($token)->withHeader('Accept', 'application/json')
+        ->post("/api/mobile/v2/conversations/{$thread->id}/messages", [
+            'attachment' => UploadedFile::fake()->create('too-large.pdf', (15 * 1024) + 1, 'application/pdf'),
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('attachment');
 });
 
 it('creates default conversation spaces when a parent links a child code', function (): void {
@@ -197,7 +256,7 @@ it('creates default conversation spaces when a parent links a child code', funct
 
     $this->flushHeaders()->withToken($token)
         ->postJson('/api/mobile/v2/children/link', [
-            'linking_code' => 'link-' . $studentA->id,
+            'linking_code' => 'link-'.$studentA->id,
             'student_number' => $studentA->student_number,
         ])
         ->assertCreated()
@@ -434,7 +493,7 @@ function createConversationGraph(bool $activeLinks = true): array
             'student_id' => $student->id,
             'parent_account_id' => $activeLinks ? $parent->id : null,
             'parent_phone' => $parent->phone,
-            'linking_code' => 'LINK-' . $student->id,
+            'linking_code' => 'LINK-'.$student->id,
             'relationship' => 'parent',
             'is_primary_contact' => true,
             'can_pick_up' => true,
@@ -468,8 +527,8 @@ function createConversationSchoolGraph(
     $section = Section::query()->create([
         'tenant_id' => $tenant->id,
         'school_id' => $school->id,
-        'name' => $schoolName . ' Section',
-        'code' => strtoupper(substr($slug, 0, 2)) . $legacySchoolId,
+        'name' => $schoolName.' Section',
+        'code' => strtoupper(substr($slug, 0, 2)).$legacySchoolId,
         'status' => 'active',
     ]);
 
@@ -495,7 +554,7 @@ function createConversationSchoolGraph(
         'tenant_id' => $tenant->id,
         'school_id' => $school->id,
         'class_id' => $class->id,
-        'student_number' => strtoupper($slug) . '-001',
+        'student_number' => strtoupper($slug).'-001',
         'first_name' => $studentFirstName,
         'last_name' => 'Student',
         'status' => 'active',
