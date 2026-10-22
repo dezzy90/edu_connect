@@ -8,6 +8,10 @@
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
+    # The backend document root is the repository root, not Laravel's public folder.
+    # Expose only versioned, hashed gate JS/CSS; never rewrite arbitrary public files.
+    RewriteRule ^gate-operator-assets/([0-9]{8}-r[0-9]+)/assets/([A-Za-z0-9_-]+\.(js|css))$ public/gate-operator-assets/$1/assets/$2 [L]
+
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule ^ index.php [L]
