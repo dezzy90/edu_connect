@@ -26,6 +26,7 @@ class Student extends Model
         'device_sync_enabled' => 'boolean',
         'mobile_visible' => 'boolean',
         'source_updated_at' => 'datetime',
+        'enrollment_photo' => 'array',
     ];
 
     public function school(): BelongsTo

@@ -1,0 +1,11 @@
+{
+  "resources/js/gate-operator.tsx": {
+    "file": "assets/gate-operator-DEwT5Ryc.js",
+    "name": "gate-operator",
+    "src": "resources/js/gate-operator.tsx",
+    "isEntry": true,
+    "css": [
+      "assets/gate-operator-CxO06xB7.css"
+    ]
+  }
+}
