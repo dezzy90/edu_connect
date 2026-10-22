@@ -67,6 +67,7 @@ class V2Schema
             $table->string('phone')->nullable();
             $table->timestamp('last_login_at')->nullable();
             $table->boolean('is_active')->default(true)->index();
+            $table->boolean('test_recovery_only')->default(false);
             $table->rememberToken();
             $table->timestamps();
         });

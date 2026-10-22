@@ -288,6 +288,10 @@ class SyncCoordinator
             }
 
             $model->delete();
+            if ($resource === 'students' && config('hikvision_push.enrollment_enabled')) {
+                app(\App\Services\Biometrics\Hikvision\EnrollmentRoster::class)->reconcile($model->id);
+                \App\Services\Biometrics\Hikvision\EnrollmentWork::request((int) $model->id);
+            }
             $stats['deleted']++;
         }
 
@@ -549,6 +553,12 @@ class SyncCoordinator
 
     private function upsertStudent(IntegrationConnection $connection, array $record): ?Student
     {
+        if (config('hikvision_push.enrollment_enabled') && array_key_exists('enrollment_photo', $record)
+            && $record['enrollment_photo'] !== null
+            && (! is_array($record['enrollment_photo']) || ! is_string($record['enrollment_photo']['revision'] ?? null)
+                || ! preg_match('/^[a-f0-9]{64}$/D', $record['enrollment_photo']['revision']))) {
+            return null;
+        }
         $schoolId = $this->localId($connection, 'school', $record['school_id'] ?? null);
         $classId = $this->localId($connection, 'class', $record['class_id'] ?? null);
 
@@ -586,6 +596,13 @@ class SyncCoordinator
         $this->restore($student);
 
         $this->map($connection, 'student', $student, $record);
+
+        if (config('hikvision_push.enrollment_enabled') && $student->wasChanged(['status', 'device_sync_enabled', 'school_id', 'tenant_id', 'first_name', 'middle_name', 'last_name', 'deleted_at'])) {
+            \App\Services\Biometrics\Hikvision\EnrollmentWork::request((int) $student->id);
+        }
+        if (config('hikvision_push.enrollment_enabled') && array_key_exists('enrollment_photo', $record)) {
+            app(\App\Services\Biometrics\Hikvision\EnrollmentPhoto::class)->stage($student, $connection, $record['enrollment_photo']);
+        }
 
         return $student;
     }

@@ -16,9 +16,13 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
-        commands: __DIR__.'/../routes/console.php',
+        commands: __DIR__.'/../routes/production_gate_console.php',
         health: '/up',
         then: function () {
+            Route::middleware('api')->group(base_path('routes/hikvision_push.php'));
+            Route::middleware('web')->group(base_path('routes/gate_admin.php'));
+            require base_path('routes/gate_admin_api.php');
+            require base_path('routes/gate_mobile.php');
             Route::middleware('web')
                 ->group(base_path('routes/admin.php'));
         },
@@ -28,10 +32,16 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->web(append: [
             HandleAppearance::class,
+            \App\Http\Middleware\RestrictGateOnlyAccount::class,
             SetSchoolContext::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
+
+        // Restrict gate-only accounts before binding unrelated legacy school records.
+        $middleware->prependToPriorityList(\Illuminate\Routing\Middleware\SubstituteBindings::class,
+            \App\Http\Middleware\RestrictGateOnlyAccount::class);
+        $middleware->prependToPriorityList(\Illuminate\Routing\Middleware\SubstituteBindings::class, EnsureAdminApiAccess::class);
 
         // Register named middleware
         $middleware->alias([
@@ -46,6 +56,7 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($request->is('admin') || $request->is('admin/*')) {
                 return route('admin.login');
             }
+
             return route('login');
         });
     })

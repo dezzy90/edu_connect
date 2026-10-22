@@ -42,6 +42,11 @@ class AdminAuthUtf8Controller extends Controller
 
             $request->session()->regenerate();
 
+            if ($adminUser->gate_only) {
+                $request->session()->forget('url.intended');
+                return Inertia::location(app(\App\Services\Biometrics\Gate\GateLanding::class)->path($adminUser));
+            }
+
             return redirect()->intended('/admin/dashboard');
         }
 

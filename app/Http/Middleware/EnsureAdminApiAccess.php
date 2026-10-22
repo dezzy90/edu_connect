@@ -30,6 +30,13 @@ class EnsureAdminApiAccess
             ], 403);
         }
 
+        if ($user->test_recovery_only) {
+            return response()->json(['message' => 'This account is restricted to test recovery.'], 403);
+        }
+        if ($user->gate_only && ! $request->routeIs('api.admin.v2.gate.*', 'api.admin.v2.auth.me', 'api.admin.v2.auth.logout')) {
+            return response()->json(['message' => 'This account is restricted to the gate workspace.'], 403);
+        }
+
         return $next($request);
     }
 }

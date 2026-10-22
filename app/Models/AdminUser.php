@@ -38,6 +38,8 @@ class AdminUser extends Authenticatable
         'last_login_at' => 'datetime',
         'password' => 'hashed',
         'is_active' => 'boolean',
+        'test_recovery_only' => 'boolean',
+        'gate_only' => 'boolean',
     ];
 
     protected $attributes = [
