@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'account_invites_enabled' => (bool) env('GATE_ACCOUNT_INVITES_ENABLED', false),
     'enabled' => (bool) env('GATE_ENABLED', false),
     'operator_enabled' => (bool) env('GATE_OPERATOR_ENABLED', false),
     'setup_enabled' => (bool) env('GATE_SETUP_ENABLED', false),

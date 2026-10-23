@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\V2\Admin\GateWorkspaceController;
 use App\Http\Controllers\Api\V2\Admin\HikvisionEnrollmentController;
 use Illuminate\Support\Facades\Route;
 
+require __DIR__.'/gate_account.php';
+
 Route::middleware('auth:admin')->prefix('admin')->name('admin.hikvision-enrollments.')->group(function (): void {
     Route::get('/hikvision-enrollments', [HikvisionEnrollmentController::class, 'index'])->name('index');
     Route::post('/hikvision-enrollment-photos/{photo}/retry', [HikvisionEnrollmentController::class, 'retryPhoto'])->whereNumber('photo')->middleware('throttle:20,1')->name('retry-photo');
