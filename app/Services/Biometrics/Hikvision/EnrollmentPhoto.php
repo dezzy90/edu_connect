@@ -165,7 +165,9 @@ final class EnrollmentPhoto
     {
         $info = @getimagesizefromstring($bytes);
         if (! $info || ! in_array($info['mime'], ['image/jpeg', 'image/png', 'image/webp'], true)
-            || min($info[0], $info[1]) < 160 || max($info[0], $info[1]) > 4096 || $info[0] * $info[1] > 12000000) {
+            // Accept bounded camera originals (including 4160x3120), not just device-ready pictures.
+            // The output below remains <=800px / enrollment_max_photo_bytes; never upscale a small face.
+            || min($info[0], $info[1]) < 160 || max($info[0], $info[1]) > 6000 || $info[0] * $info[1] > 16000000) {
             throw new RuntimeException('photo_needs_replacement');
         }
         if (! function_exists('imagecreatefromstring')) {
