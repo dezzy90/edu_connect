@@ -28,6 +28,10 @@ class SyncCoordinator
 {
     private const SOURCE = 'edu_admin';
 
+    // Gate-only installations already have exact school mappings. Do not import
+    // shared academic years or unrelated parent/mobile resources through their poller.
+    private const GATE_RESOURCES = ['sections', 'education_options', 'streams', 'classes', 'students'];
+
     private const INITIAL_RESOURCES = [
         'schools',
         'academic_years',
@@ -50,6 +54,7 @@ class SyncCoordinator
         EduAdminConnector $connector,
         array $context = []
     ): IntegrationSyncRun {
+        $resources = $this->syncResources($connection, []);
         $run = IntegrationSyncRun::query()->create([
             'connection_id' => $connection->id,
             'sync_type' => 'initial',
@@ -62,10 +67,10 @@ class SyncCoordinator
         ]);
 
         try {
-            DB::transaction(function () use ($connection, $connector, $run): void {
+            DB::transaction(function () use ($connection, $connector, $run, $resources): void {
                 $this->syncTenant($connection, $connector->bootstrap());
 
-                foreach (self::INITIAL_RESOURCES as $resource) {
+                foreach ($resources as $resource) {
                     $this->syncResource($connection, $connector, $run, $resource);
                 }
             });
@@ -107,7 +112,7 @@ class SyncCoordinator
         array $context = []
     ): IntegrationSyncRun {
         $updatedAfter = ($context['updated_after'] ?? null) ?: $connection->last_successful_sync_at?->toIso8601String();
-        $resources = ($context['resources'] ?? null) ?: self::INCREMENTAL_RESOURCES;
+        $resources = $this->syncResources($connection, ($context['resources'] ?? null) ?: []);
         $cursorBefore = [
             'updated_after' => $updatedAfter,
             'cursor' => $context['cursor'] ?? null,
@@ -182,8 +187,25 @@ class SyncCoordinator
         return $run->refresh();
     }
 
+    private function syncResources(IntegrationConnection $connection, array $requested): array
+    {
+        $flags = $connection->feature_flags ?? [];
+        if (array_key_exists('gate_only_sync', $flags) && ! is_bool($flags['gate_only_sync'])) {
+            throw new \InvalidArgumentException('Gate-only sync mode must be an explicit boolean.');
+        }
+        if (($flags['gate_only_sync'] ?? false) !== true) {
+            return $requested ?: self::INCREMENTAL_RESOURCES;
+        }
+        if (array_diff($requested, self::GATE_RESOURCES) !== []) {
+            throw new \InvalidArgumentException('Gate-only connections cannot import unrelated source resources.');
+        }
+
+        return $requested ?: self::GATE_RESOURCES;
+    }
+
     public function importResourceRecords(IntegrationConnection $connection, string $resource, iterable $records): array
     {
+        $this->syncResources($connection, [$resource]);
         $stats = [
             'read' => 0,
             'created' => 0,
