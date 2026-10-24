@@ -159,7 +159,9 @@ final class OutboxDispatcher
             $snapshot = json_decode($row->delivery_snapshot, true, 16, JSON_THROW_ON_ERROR);
             $head = DB::table('ec_gate_movements')->where('event_id', $row->event_id)->sole();
             $superseded = (int) $head->revision > (int) $row->revision;
+            $schoolAllows = ParentAlertSettings::permits($event);
             $created = 0;
+            $hasPush = false;
             foreach ($snapshot['parent_ids'] as $id) {
                 $existing = DB::table('ec_gate_parent_deliveries')->where('outbox_id', $row->id)->where('parent_account_id', $id)->first();
                 if ($existing) {
@@ -176,7 +178,9 @@ final class OutboxDispatcher
                 $seen = DB::table('ec_gate_parent_deliveries as pd')->join('ec_gate_outbox as po', 'po.id', '=', 'pd.outbox_id')
                     ->where('po.event_id', $row->event_id)->where('po.revision', '<', $row->revision)
                     ->where('pd.parent_account_id', $id)->where('pd.status', 'sent')->exists();
-                $allowed = $link && (! $preference || $preference->in_app_enabled) && ! $superseded && ($event['state'] === 'active' || $seen);
+                $inApp = ! $preference || $preference->in_app_enabled;
+                $push = config('gate.parent_push_enabled') === true && (! $preference || $preference->push_enabled);
+                $allowed = $schoolAllows && $link && ($inApp || $push) && ! $superseded && ($event['state'] === 'active' || $seen);
                 $notification = null;
                 if ($allowed) {
                     $corrected = $seen && ($event['state'] === 'withdrawn' || (int) $row->revision > 1);
@@ -184,24 +188,37 @@ final class OutboxDispatcher
                     $data = array_intersect_key($event, array_flip(['student_id', 'school_id', 'movement', 'state', 'occurred_at', 'received_at', 'timezone', 'late']));
                     $data += ['source' => 'gate', 'gate_event_id' => $event['event_id'], 'revision' => (int) $row->revision,
                         'delayed' => CarbonImmutable::parse($event['received_at'])->diffInSeconds(CarbonImmutable::parse($event['occurred_at']), true) > 60];
-                    // DB insert deliberately avoids legacy observers/global push dispatch. In-app feed only.
+                    $student = DB::table('ec_students')->where('id', $event['student_id'])->where('tenant_id', $event['tenant_id'])->where('school_id', $event['school_id'])->first(['first_name', 'last_name']);
+                    $school = DB::table('ec_schools')->where('id', $event['school_id'])->where('tenant_id', $event['tenant_id'])->value('name');
+                    $private = in_array(config('educonnect.notifications.privacy_mode'), ['hidden', 'private'], true);
+                    $name = $private ? 'Your child' : trim(($student?->first_name ?? '').' '.($student?->last_name ?? ''));
+                    $movement = $event['movement'] === 'check_in' ? 'arrived at' : 'left';
+                    $channel = $push ? ($inApp ? 'in_app_push' : 'push') : 'in_app';
+                    // Queue push explicitly after the durable feed insert; do not invoke legacy attendance observers.
                     $notification = DB::table('ec_mobile_notifications')->insertGetId(['parent_account_id' => $id,
                         'tenant_id' => $event['tenant_id'], 'school_id' => $event['school_id'], 'type' => 'attendance',
-                        'title' => $corrected ? 'School gate record corrected' : 'School gate update',
+                        'title' => $corrected ? 'Attendance record updated' : ($event['movement'] === 'check_in' ? 'Arrived at school' : 'Left school'),
                         'body' => $corrected ? 'A recorded school gate movement has been corrected. Open the gate history for the current record.'
-                            : 'School gate '.($event['movement'] === 'check_in' ? 'check-in' : 'check-out').' recorded at '.$at->format('Y-m-d H:i').'.',
-                        'data' => json_encode($data, JSON_THROW_ON_ERROR), 'priority' => 'normal', 'channel' => 'in_app',
-                        'delivery_status' => 'sent', 'sent_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+                            : $name.' '.$movement.' '.($private ? 'school' : $school).' at '.$at->format('H:i').' on '.$at->format('d M Y').'.',
+                        'data' => json_encode($data, JSON_THROW_ON_ERROR), 'priority' => 'normal', 'channel' => $channel,
+                        'delivery_status' => $push ? 'queued' : 'sent', 'sent_at' => $push ? null : now(), 'created_at' => now(), 'updated_at' => now()]);
+                    if ($push) {
+                        $hasPush = true;
+                        app(\App\Services\Notifications\PushNotificationDispatcher::class)->enqueueNotification(
+                            \App\Models\V2\MobileNotification::withoutGlobalScopes()->findOrFail($notification));
+                    }
                     $created++;
                 }
                 DB::table('ec_gate_parent_deliveries')->insert(['outbox_id' => $row->id, 'parent_account_id' => $id,
                     'status' => $allowed ? 'sent' : 'skipped', 'reason_code' => $allowed ? null : match (true) {
-                        ! $link => 'link_not_active', $superseded => 'superseded_before_delivery',
+                        ! $schoolAllows => 'school_alert_disabled', ! $link => 'link_not_active', $superseded => 'superseded_before_delivery',
                         $event['state'] === 'withdrawn' && ! $seen => 'withdrawn_before_delivery', default => 'preference_disabled',
                     },
                     'notification_id' => $notification, 'created_at' => now()]);
             }
             $state = $created > 0 ? 'sent' : 'skipped';
+            if ($hasPush) DB::afterCommit(fn () => \App\Jobs\V2\Notifications\DispatchGateParentAlertsJob::dispatch()
+                ->onQueue((string) config('integrations.scheduler.queue', 'edu-connect')));
             $this->finish($row, $state);
 
             return $state;

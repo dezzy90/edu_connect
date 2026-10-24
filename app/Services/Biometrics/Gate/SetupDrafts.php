@@ -65,7 +65,7 @@ final class SetupDrafts
             'configuration' => $c, 'updated_at' => $row?->updated_at, 'state' => 'draft'],
             'readiness' => ['missing' => SetupRules::missing($c), 'configuration_complete' => SetupRules::missing($c) === [],
                 'checks' => $checks, 'activation_available' => $activation['can_activate']],
-            'activation' => $activation,
+            'activation' => $activation, 'parentAlerts' => app(ParentAlertSettings::class)->read($school),
             'classes' => $classes->take(200)->values(), 'classes_truncated' => $classes->count() > 200,
             'connection' => ['matched' => (bool) $connected, 'connection_id' => $binding ? (int) $binding->connection_id : null,
                 'eduadmin_school_id' => $binding ? (int) $binding->remote_school_id : null],

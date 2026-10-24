@@ -37,7 +37,7 @@ class NotificationController extends Controller
         $query = MobileNotification::query()
             ->with('school')
             ->where('parent_account_id', $parent->id)
-            ->visible();
+            ->visible()->where(fn ($q) => $q->whereNull('data->source')->orWhere('data->source', '!=', 'gate')->orWhereIn('channel', ['in_app', 'in_app_push', 'all']));
 
         if (! empty($validated['type'])) {
             $query->where('type', $validated['type']);
@@ -102,7 +102,7 @@ class NotificationController extends Controller
         $query = MobileNotification::query()
             ->where('parent_account_id', $parent->id)
             ->whereNull('read_at')
-            ->visible();
+            ->visible()->where(fn ($q) => $q->whereNull('data->source')->orWhere('data->source', '!=', 'gate')->orWhereIn('channel', ['in_app', 'in_app_push', 'all']));
 
         if (! empty($validated['type'])) {
             $query->where('type', $validated['type']);

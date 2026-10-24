@@ -65,6 +65,13 @@ it('honors an explicit allowed subset', function (): void {
     expect($this->connector->calls)->toBe(['students']);
 });
 
+it('imports only parent access in addition to gate resources when explicitly opted in', function () {
+    $this->connection->update(['feature_flags' => ['gate_only_sync' => true, 'gate_parent_links_enabled' => true]]);
+    app(SyncCoordinator::class)->runIncrementalSync($this->connection, $this->connector);
+    expect($this->connector->calls)->toBe(['sections', 'education_options', 'streams', 'classes', 'students', 'parent_links']);
+    expect(fn () => app(SyncCoordinator::class)->runIncrementalSync($this->connection, $this->connector, ['resources' => ['academic_years']]))->toThrow(InvalidArgumentException::class);
+});
+
 it('rejects unrelated or mixed requests before creating a run or making source requests', function (array $resources): void {
     expect(fn () => app(SyncCoordinator::class)->runIncrementalSync($this->connection, $this->connector, ['resources' => $resources]))
         ->toThrow(InvalidArgumentException::class);
