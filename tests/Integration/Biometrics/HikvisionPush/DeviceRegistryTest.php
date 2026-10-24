@@ -74,7 +74,8 @@ it('registers one shared gate for three schools without enabling transport or di
         ->assertJsonPath('data.student_sync_started', false)->assertJsonPath('data.gate_policy_activated', false);
     $id = $response->json('data.device_id');
     $secret = $response->json('data.connection_secret.password');
-    expect(strlen($secret))->toBe(48);
+    expect(strlen($secret))->toBe(32);
+    expect($secret)->toMatch('/^[a-f0-9]{32}$/D');
     $push = DB::table('ec_hikvision_push_devices')->where('device_id', $id)->sole();
     expect((bool) $push->enabled)->toBeFalse();
     expect($push->credential_encrypted)->not->toContain($secret);
@@ -345,6 +346,7 @@ it('reassigns only unused registrations within one complex and retains the previ
     $new = DB::table('ec_hikvision_push_devices')->where('device_id', $id)->sole();
     expect($new->school_id)->toBe($this->schools[1]->id);
     expect($new->credential_encrypted)->not->toBe($old->credential_encrypted);
+    expect(Crypt::decryptString($new->credential_encrypted))->toMatch('/^[a-f0-9]{32}$/D');
     expect($new->deployment_epoch)->not->toBe($old->deployment_epoch);
     expect(DeviceScope::schools($new))->toBe([$this->schools[1]->id, $this->schools[2]->id]);
     expect(DB::table('ec_device_school_assignments')->where('device_id', $id)->where('active', false)->count())->toBe(3);
@@ -355,7 +357,8 @@ it('reassigns only unused registrations within one complex and retains the previ
 it('rotates an unused registrations dedicated credentials without disclosing them to another complex administrator', function (): void {
     $id = registryCreate($this);
     $first = registryAction($this, $id, 'rotate')->assertOk()->json('data.connection_secret.password');
-    expect(strlen($first))->toBe(48);
+    expect(strlen($first))->toBe(32);
+    expect($first)->toMatch('/^[a-f0-9]{32}$/D');
     registryAction($this, $id, 'rotate', ['expected_revision' => 1])->assertOk()->assertJsonPath('data.connection_secret.password', $first);
     $another = AdminUser::create(['name' => 'SYNTHETIC second technician', 'email' => 'other@registry.test', 'password' => 'SYNTHETIC-password', 'role' => 'school_admin', 'is_active' => true]);
     DB::table('ec_device_admin_assignments')->insert(['tenant_id' => $this->fixture['tenant']->id, 'admin_id' => $another->id, 'active' => true]);
