@@ -130,14 +130,14 @@ final class GateSourceWorkspaceController extends Controller
                 $user = AdminUser::whereKey($binding->admin_id)->lockForUpdate()->first();
                 abort_unless($user && $user->gate_source_only && $user->is_active, 403);
                 $user->forceFill(['name' => $actor['name']])->save();
-                DB::table('ec_gate_source_actors')->where('id', $binding->id)->update(['authority_until' => now()->addSeconds(60)]);
+                DB::table('ec_gate_source_actors')->where('id', $binding->id)->update(['authority_until' => now()->utc()->addSeconds(60)]);
             } else {
                 $email = 'source-'.hash('sha256', $bridge->id.'|'.$actor['id']).'@audit.invalid';
                 abort_if(AdminUser::where('email', $email)->exists(), 409, 'Source audit identity collision requires operator review.');
                 $user = new AdminUser;
                 $user->forceFill(['name' => $actor['name'], 'email' => $email, 'password' => Hash::make(Str::random(96)),
                     'role' => 'school_admin', 'is_active' => true, 'gate_only' => true, 'gate_source_only' => true])->save();
-                DB::table('ec_gate_source_actors')->insert(['bridge_id' => $bridge->id, 'source_user_id' => $actor['id'], 'admin_id' => $user->id, 'authority_until' => now()->addSeconds(60)]);
+                DB::table('ec_gate_source_actors')->insert(['bridge_id' => $bridge->id, 'source_user_id' => $actor['id'], 'admin_id' => $user->id, 'authority_until' => now()->utc()->addSeconds(60)]);
             }
             DB::table('ec_gate_operator_assignments')->where('admin_id', $user->id)->update(['active' => false]);
             foreach ($scope as $school => $roles) {
