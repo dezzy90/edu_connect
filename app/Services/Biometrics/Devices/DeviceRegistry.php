@@ -204,7 +204,8 @@ final class DeviceRegistry
                         'status' => 'active', 'settings' => '{}', 'created_at' => now()->utc(), 'updated_at' => now()->utc()]);
                     DB::table('ec_hikvision_push_devices')->insert(['device_id' => $id, 'tenant_id' => $tenant, 'school_id' => $schoolIds[0],
                         'serial' => $serial, 'deployment_epoch' => (string) Str::uuid(), 'model' => 'DS-K1T342MFWX-E1', 'firmware' => $input['firmware'],
-                        'auth_profile' => 'sha256', 'username' => 'ec-'.bin2hex(random_bytes(12)), 'credential_encrypted' => Crypt::encryptString(bin2hex(random_bytes(24))),
+                        // PushSDK terminals cap the password at 32 characters; 16 random bytes retain 128 bits of entropy.
+                        'auth_profile' => 'sha256', 'username' => 'ec-'.bin2hex(random_bytes(12)), 'credential_encrypted' => Crypt::encryptString(bin2hex(random_bytes(16))),
                         'enabled' => false, 'created_at' => now()->utc(), 'updated_at' => now()->utc()]);
                     DB::table('ec_device_registry')->insert(['device_id' => $id, 'serial_key' => $serial, 'revision' => 1,
                         'managed_registration' => true, 'scope_mode' => count($schoolIds) > 1 ? 'shared_gate' : 'single_school',
@@ -254,7 +255,7 @@ final class DeviceRegistry
                             DB::table('ec_device_registry')->where('device_id', $id)->update(['scope_mode' => count($schoolIds) > 1 ? 'shared_gate' : 'single_school']);
                         }
                         DB::table('ec_hikvision_push_devices')->where('id', $push->id)->update(['username' => 'ec-'.bin2hex(random_bytes(12)),
-                            'credential_encrypted' => Crypt::encryptString(bin2hex(random_bytes(24))), 'login_failures' => 0, 'locked_until' => 0, 'updated_at' => now()->utc()]);
+                            'credential_encrypted' => Crypt::encryptString(bin2hex(random_bytes(16))), 'login_failures' => 0, 'locked_until' => 0, 'updated_at' => now()->utc()]);
                         DB::table('ec_hikvision_push_sessions')->where('push_device_id', $push->id)->delete();
                         DB::table('ec_device_registry')->where('device_id', $id)->update(['credential_version' => (int) $meta->credential_version + 1,
                             'credentials_issued_at' => now()->utc(), 'last_verified_at' => null]);
