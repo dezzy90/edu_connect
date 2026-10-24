@@ -79,6 +79,72 @@ it('does not automatically register an unknown terminal or assign it to a school
     expect(DB::table('ec_hikvision_push_sessions')->count())->toBe(0);
 });
 
+it('authenticates an explicitly bound transport serial without changing the canonical identity or school', function (): void {
+    $this->graph['device']->update(['settings' => ['hikvision_push_identity' => [
+        'canonical_serial' => 'SYNTHETIC-HIK-001', 'transport_serial' => 'SHORT-001']]]);
+    $terminal = hkPushTerminal($this, 'SHORT-001');
+    $terminal->connect()->assertOk();
+    $terminal->send('CommandRequest')->assertOk();
+    $terminal->send('Event', PushTerminalSimulator::scan())->assertOk();
+    $observation = DB::table('ec_hikvision_observations')->sole();
+    expect((int) $observation->push_device_id)->toBe($this->pushId);
+    expect((int) $observation->tenant_id)->toBe($this->graph['tenant']->id);
+    expect((int) $observation->school_id)->toBe($this->graph['school']->id);
+    expect(DB::table('ec_hikvision_push_devices')->value('serial'))->toBe('SYNTHETIC-HIK-001');
+    hkPushTerminal($this)->connect()->assertOk();
+    expect(DB::table('ec_hikvision_push_devices')->count())->toBe(1);
+    expect(DB::table('ec_attendance_events')->count())->toBe(0);
+    Http::assertNothingSent();
+});
+
+it('does not infer a short identifier or accept a changed binding', function (array $binding, string $wire): void {
+    $this->graph['device']->update(['settings' => ['hikvision_push_identity' => $binding]]);
+    hkPushTerminal($this, $wire)->connect()->assertUnauthorized();
+    expect(DB::table('ec_hikvision_push_sessions')->count())->toBe(0);
+})->with([
+    'unbound suffix' => [[], '001'],
+    'unbound short' => [[], 'SHORT-001'],
+    'different canonical' => [['canonical_serial' => 'SYNTHETIC-OTHER', 'transport_serial' => 'SHORT-001'], 'SHORT-001'],
+    'wrong case' => [['canonical_serial' => 'SYNTHETIC-HIK-001', 'transport_serial' => 'SHORT-001'], 'short-001'],
+    'prefix only' => [['canonical_serial' => 'SYNTHETIC-HIK-001', 'transport_serial' => 'SHORT-001'], 'SHORT-00'],
+    'non-string transport' => [['canonical_serial' => 'SYNTHETIC-HIK-001', 'transport_serial' => ['SHORT-001']], 'SHORT-001'],
+]);
+
+it('still requires the dedicated platform password for a bound transport identifier', function (): void {
+    $this->graph['device']->update(['settings' => ['hikvision_push_identity' => [
+        'canonical_serial' => 'SYNTHETIC-HIK-001', 'transport_serial' => 'SHORT-001']]]);
+    hkPushTerminal($this, 'SHORT-001', password: 'WRONG-PASSWORD')->connect()->assertUnauthorized();
+    expect(DB::table('ec_hikvision_push_sessions')->count())->toBe(0);
+});
+
+it('refuses ambiguous transport identifiers even across a different disabled complex', function (bool $enabled, bool $canonicalCollision): void {
+    $binding = ['canonical_serial' => 'SYNTHETIC-HIK-001', 'transport_serial' => 'SHORT-001'];
+    $this->graph['device']->update(['settings' => ['hikvision_push_identity' => $binding]]);
+    $tenant = Tenant::create(['name' => 'Other synthetic complex', 'slug' => 'other-identity', 'status' => 'active']);
+    $school = School::create(['tenant_id' => $tenant->id, 'name' => 'Other synthetic school', 'slug' => 'other-identity', 'type' => 'secondary', 'status' => 'active']);
+    $serial = $canonicalCollision ? 'SHORT-001' : 'SYNTHETIC-OTHER-002';
+    $device = BiometricDevice::create(['tenant_id' => $tenant->id, 'school_id' => $school->id, 'name' => 'Other synthetic terminal',
+        'device_uid' => 'OTHER-IDENTITY', 'serial_number' => $serial, 'device_type' => 'hikvision', 'status' => 'active',
+        'settings' => $canonicalCollision ? [] : ['hikvision_push_identity' => ['canonical_serial' => $serial, 'transport_serial' => 'SHORT-001']]]);
+    $id = app(PushProvisioner::class)->register($device->id, $serial, 'SYNTHETIC-FIRMWARE', 'sha256', 'other-gate', hkPushPassword());
+    DB::table('ec_hikvision_push_devices')->where('id', $id)->update(['enabled' => $enabled]);
+    hkPushTerminal($this, 'SHORT-001')->connect()->assertUnauthorized();
+    expect(DB::table('ec_hikvision_push_sessions')->count())->toBe(0);
+})->with([[true, true], [false, true], [true, false], [false, false]]);
+
+it('retains canonical scope and disabled-state checks when using a bound identifier', function (string $disabled): void {
+    $this->graph['device']->update(['settings' => ['hikvision_push_identity' => [
+        'canonical_serial' => 'SYNTHETIC-HIK-001', 'transport_serial' => 'SHORT-001']]]);
+    match ($disabled) {
+        'push' => DB::table('ec_hikvision_push_devices')->where('id', $this->pushId)->update(['enabled' => false]),
+        'device' => $this->graph['device']->update(['status' => 'inactive']),
+        'tenant' => $this->graph['tenant']->update(['status' => 'inactive']),
+        'school' => $this->graph['school']->update(['status' => 'inactive']),
+    };
+    hkPushTerminal($this, 'SHORT-001')->connect()->assertUnauthorized();
+    expect(DB::table('ec_hikvision_push_sessions')->count())->toBe(0);
+})->with(['push', 'device', 'tenant', 'school']);
+
 it('can discover enrollment capabilities through authenticated read-only command polling', function (): void {
     $uuid = app(PushCommands::class)->queue($this->pushId, PushCommands::ENROLLMENT_DISCOVERY_URLS[0]);
     $terminal = hkPushTerminal($this);

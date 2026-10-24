@@ -17,8 +17,8 @@ final class PushReceiver
     public function handle(string $serial, string $operation, array $body, ?string $customAuth): array
     {
         return DB::transaction(function () use ($serial, $operation, $body, $customAuth): array {
-            $device = DB::table('ec_hikvision_push_devices')->where('serial', $serial)->where('enabled', true)->lockForUpdate()->first();
-            if (! $device || $device->serial !== $serial || ! $this->scopeValid($device)) {
+            $device = $this->registeredIdentity($serial);
+            if (! $device || ! $this->scopeValid($device)) {
                 return self::failure(401);
             }
             $time = now()->getTimestamp();
@@ -115,6 +115,33 @@ final class PushReceiver
         }
 
         return $list;
+    }
+
+    private function registeredIdentity(string $serial): ?object
+    {
+        // The transport SN may differ from the label/web serial. Only a separately
+        // operator-bound exact pair is accepted: never suffix matching or auto-registration.
+        // Include disabled candidates too, so a collision cannot shadow another identity.
+        $matches = DB::table('ec_hikvision_push_devices as p')
+            ->join('ec_biometric_devices as d', 'd.id', '=', 'p.device_id')
+            ->where(fn ($q) => $q->where('p.serial', $serial)
+                ->orWhere('d.settings->hikvision_push_identity->transport_serial', $serial))
+            ->limit(2)->lockForUpdate()->get(['p.*', 'd.settings as identity_settings']);
+        if ($matches->count() !== 1) {
+            return null;
+        }
+        $device = $matches->first();
+        if (! $device->enabled) {
+            return null;
+        }
+        $binding = json_decode($device->identity_settings ?? '{}', true)['hikvision_push_identity'] ?? null;
+        if ($device->serial !== $serial && (! is_array($binding)
+            || ($binding['canonical_serial'] ?? null) !== $device->serial
+            || ($binding['transport_serial'] ?? null) !== $serial)) {
+            return null;
+        }
+
+        return $device;
     }
 
     private function scopeValid(object $device): bool
