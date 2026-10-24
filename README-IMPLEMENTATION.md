@@ -1,5 +1,9 @@
 # Rod-Connect: Multi-Tenant Student Follow-Up SaaS Application
 
+## Parent onboarding status bridge
+
+The signed EduAdmin gate-workspace operation `parent_onboarding` returns read-only source-student linking and phone-setup counts. It reuses the currently signed school/class scope, exact source connection mapping, current eligible roster, active parent-child links, active accounts, attendance push preferences and non-revoked phone registrations. It separately reports school arrival/departure switches and mobile visibility. No guardian identities, phone numbers, access codes or device tokens are returned. Setup is not a receipt acknowledgement, and this read operation never sends a parent notification or modifies child links.
+
 ## Overview
 
 This Laravel application provides a comprehensive multi-tenant SaaS solution for student follow-up across multiple schools, featuring biometric check-in/check-out via MQTT and real-time notifications through WebSockets.
