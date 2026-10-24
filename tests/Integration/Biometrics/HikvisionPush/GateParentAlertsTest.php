@@ -20,6 +20,7 @@ beforeEach(function () {
     foreach (['2026_10_21_000024_create_gate_setup_drafts.php', '2026_10_24_000030_create_gate_parent_alerts.php'] as $file) (require base_path('database/migrations/'.$file))->up();
     Carbon::setTestNow('2026-10-20T18:00:00Z');
     Http::preventStrayRequests();
+    \Illuminate\Support\Facades\Queue::fake();
     config(['gate.parent_push_enabled' => true, 'gate.mirror_delivery_enabled' => false, 'educonnect.notifications.push_transport' => 'provider',
         'educonnect.notifications.fcm.access_token' => 'SYNTHETIC-token', 'educonnect.notifications.fcm.project_id' => 'synthetic-project']);
     $this->parent = GateFixture::parent($this->f);
@@ -40,6 +41,7 @@ it('delivers arrival and departure through the actual push adapter once per acce
     Http::assertSentCount(2);
     expect(DB::table('ec_mobile_notifications')->orderBy('id')->pluck('title')->all())->toBe(['Arrived at school', 'Left school']);
     expect(DB::table('ec_notification_deliveries')->where('status', 'sent')->count())->toBe(2);
+    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\V2\Notifications\DispatchGateParentAlertsJob::class);
 });
 
 it('rechecks parent access and preferences before any queued phone alert', function (string $change) {

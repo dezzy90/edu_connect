@@ -161,6 +161,7 @@ final class OutboxDispatcher
             $superseded = (int) $head->revision > (int) $row->revision;
             $schoolAllows = ParentAlertSettings::permits($event);
             $created = 0;
+            $hasPush = false;
             foreach ($snapshot['parent_ids'] as $id) {
                 $existing = DB::table('ec_gate_parent_deliveries')->where('outbox_id', $row->id)->where('parent_account_id', $id)->first();
                 if ($existing) {
@@ -201,8 +202,11 @@ final class OutboxDispatcher
                             : $name.' '.$movement.' '.($private ? 'school' : $school).' at '.$at->format('H:i').' on '.$at->format('d M Y').'.',
                         'data' => json_encode($data, JSON_THROW_ON_ERROR), 'priority' => 'normal', 'channel' => $channel,
                         'delivery_status' => $push ? 'queued' : 'sent', 'sent_at' => $push ? null : now(), 'created_at' => now(), 'updated_at' => now()]);
-                    if ($push) app(\App\Services\Notifications\PushNotificationDispatcher::class)->enqueueNotification(
-                        \App\Models\V2\MobileNotification::withoutGlobalScopes()->findOrFail($notification));
+                    if ($push) {
+                        $hasPush = true;
+                        app(\App\Services\Notifications\PushNotificationDispatcher::class)->enqueueNotification(
+                            \App\Models\V2\MobileNotification::withoutGlobalScopes()->findOrFail($notification));
+                    }
                     $created++;
                 }
                 DB::table('ec_gate_parent_deliveries')->insert(['outbox_id' => $row->id, 'parent_account_id' => $id,
@@ -213,6 +217,8 @@ final class OutboxDispatcher
                     'notification_id' => $notification, 'created_at' => now()]);
             }
             $state = $created > 0 ? 'sent' : 'skipped';
+            if ($hasPush) DB::afterCommit(fn () => \App\Jobs\V2\Notifications\DispatchGateParentAlertsJob::dispatch()
+                ->onQueue((string) config('integrations.scheduler.queue', 'edu-connect')));
             $this->finish($row, $state);
 
             return $state;
