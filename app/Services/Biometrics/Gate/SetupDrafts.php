@@ -17,10 +17,8 @@ final class SetupDrafts
         $school = app(SetupAccess::class)->school($actor, $schoolId);
         $row = DB::table('ec_gate_setup_drafts')->where('tenant_id', $school->tenant_id)->where('school_id', $schoolId)->first();
         $c = $row ? SetupRules::normalize(json_decode($row->configuration, true, 16, JSON_THROW_ON_ERROR), stored: true) : SetupRules::blank();
-        $staff = DB::table('ec_gate_operator_assignments as a')->join('admin_users as u', 'u.id', '=', 'a.admin_id')
-            ->where('a.tenant_id', $school->tenant_id)->where('a.school_id', $schoolId)->where('a.active', true)
-            ->whereIn('a.role', OperatorAccess::ROLES)->where('u.is_active', true)->where('u.test_recovery_only', false)
-            ->orderBy('a.id')->limit(201)->get(['u.id', 'u.name', 'a.role']);
+        $staff = StaffingPolicy::staff((int) $school->tenant_id, $schoolId)->orderBy('a.id')->limit(201)->get(['u.id', 'u.name', 'a.role']);
+        $staffing = StaffingPolicy::requirement((int) $school->tenant_id, $schoolId);
         $devices = \App\Services\Biometrics\Devices\DeviceScope::schoolDevices((int) $school->tenant_id, $schoolId)
             ->orderBy('id')->limit(201)->get(['id', 'name', 'device_uid']);
         $devices->each(function ($device): void {
@@ -53,7 +51,7 @@ final class SetupDrafts
                     ? 'Automatic eligibility: all current and future active/enrolled EduAdmin students in this school, without individual selection. Photos, assigned devices and capacity are separate readiness checks.'
                     : 'Restricted pilot: every selected student must remain eligible in this school. An empty pilot includes nobody.'],
             ['key' => 'devices', 'ok' => $c['device_ids'] !== [] && count($activeDeviceIds) === count($c['device_ids']), 'message' => 'Select active terminals assigned to this school, including a participating shared gate. Saving does not enroll anyone or contact a terminal.'],
-            ['key' => 'staff', 'ok' => in_array('guard', $staff->pluck('role')->all(), true) && in_array('discipline_master', $staff->pluck('role')->all(), true), 'message' => 'A guard and discipline master need explicit active gate assignments. This screen cannot grant them.'],
+            ['key' => 'staff', 'ok' => StaffingPolicy::satisfied($staffing, $staff->pluck('role')->all()), 'message' => $staffing['message'].' This screen cannot grant them.'],
         ];
         $history = $row ? DB::table('ec_gate_setup_revisions as r')->leftJoin('admin_users as u', 'u.id', '=', 'r.actor_id')
             ->where('r.draft_id', $row->id)->orderByDesc('r.revision')->limit(20)

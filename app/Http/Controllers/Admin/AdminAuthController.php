@@ -33,7 +33,7 @@ class AdminAuthController extends Controller
             ->where('is_active', true)
             ->first();
 
-        if ($adminUser && Hash::check($credentials['password'], $adminUser->password)) {
+        if ($adminUser && ! $adminUser->gate_source_only && Hash::check($credentials['password'], $adminUser->password)) {
             Auth::guard('admin')->login($adminUser, $request->boolean('remember'));
 
             // Update last login timestamp

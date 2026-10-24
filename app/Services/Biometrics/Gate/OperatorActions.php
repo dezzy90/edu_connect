@@ -42,8 +42,8 @@ final class OperatorActions
             $permitted = match ($operation) {
                 'correct' => ['discipline_master'],
                 'approve_correction' => ['discipline_master', 'correction_approver'],
-                'request_correction' => ['guard'],
-                default => ['discipline_master', 'guard'],
+                'request_correction' => ['guard', 'secretary'],
+                default => ['discipline_master', 'guard', 'secretary'],
             };
             $role = array_values(array_intersect($permitted, $roles))[0] ?? null;
             abort_unless($role, 403, 'This gate assignment cannot perform that action.');
@@ -126,6 +126,11 @@ final class OperatorActions
                     ->where('expires_at', '>', now()->utc())->exists(), 409, 'An exit authorization is already waiting for a scan.');
                 $expiry = min(now()->utc()->getTimestamp() + OperatorRules::seconds($rules['validity_seconds'] ?? null),
                     CarbonImmutable::parse($day->day.'T'.$policy['departure_start'], $policy['timezone'])->utc()->getTimestamp());
+                if ($actor->gate_source_only) {
+                    $until = DB::table('ec_gate_source_actors')->where('admin_id', $actor->id)->value('authority_until');
+                    abort_unless($until && CarbonImmutable::parse($until, 'UTC')->isFuture(), 403);
+                    $expiry = min($expiry, CarbonImmutable::parse($until, 'UTC')->timestamp);
+                }
                 $values['expires_at'] = CarbonImmutable::createFromTimestampUTC($expiry);
                 $parameters += ['device_id' => $deviceId, 'policy_version' => $policy['version'], 'policy_id' => $policyId,
                     'policy_snapshot' => $policy, 'return_rules_snapshot' => $policy['return_rules'] ?? null,

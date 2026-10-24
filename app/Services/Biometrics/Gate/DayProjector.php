@@ -189,10 +189,15 @@ final class DayProjector
                 }
                 $authorityValid = true;
                 if ($a->kind === 'permit_exit' && $a->consumed_observation_id === null && ($parameters['operation'] ?? null) === 'permit_exit') {
-                    $authorityValid = (bool) config('gate.operator_enabled')
+                    $sourceUser = DB::table('admin_users')->where('id', $a->actor_id)->first();
+                    $sourceValid = ! ($sourceUser->gate_source_only ?? false) || DB::table('ec_gate_source_actors')
+                        ->where('admin_id', $a->actor_id)->where('authority_until', '>', now()->utc())->exists();
+                    $authorityValid = $sourceValid && (bool) config('gate.operator_enabled')
                         && DB::table('admin_users')->where('id', $a->actor_id)->where('is_active', true)->where('test_recovery_only', false)->lockForUpdate()->first() !== null
-                        && DB::table('ec_gate_operator_assignments')->where('admin_id', $a->actor_id)->where('tenant_id', $day->tenant_id)
-                            ->where('school_id', $day->school_id)->where('role', $a->role)->where('active', true)->lockForUpdate()->first() !== null;
+                        && StaffingPolicy::restrict(DB::table('ec_gate_operator_assignments as a')
+                            ->join('ec_schools as s', fn ($q) => $q->on('s.id', '=', 'a.school_id')->on('s.tenant_id', '=', 'a.tenant_id'))
+                            ->where('a.admin_id', $a->actor_id)->where('a.tenant_id', $day->tenant_id)
+                            ->where('a.school_id', $day->school_id)->where('a.role', $a->role)->where('a.active', true))->lockForUpdate()->first() !== null;
                 }
 
                 return array_replace($parameters, ['id' => $a->id, 'tenant_id' => (int) $day->tenant_id,

@@ -22,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
             Route::middleware('api')->group(base_path('routes/hikvision_push.php'));
             Route::middleware('web')->group(base_path('routes/gate_admin.php'));
             require base_path('routes/gate_admin_api.php');
+            require base_path('routes/gate_source_workspace.php');
             require base_path('routes/gate_mobile.php');
             Route::middleware('web')
                 ->group(base_path('routes/admin.php'));

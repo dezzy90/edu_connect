@@ -2,6 +2,18 @@
 
 return [
     'account_invites_enabled' => (bool) env('GATE_ACCOUNT_INVITES_ENABLED', false),
+    // Opt-in complex staffing: secretaries operate all explicitly assigned schools; DMs only secondary.
+    'secretary_complex_ids' => (static function (): array {
+        $text = trim((string) env('GATE_SECRETARY_COMPLEX_IDS', ''));
+        if ($text === '') {
+            return [];
+        }
+        if (! preg_match('/^[1-9]\d*(?:,[1-9]\d*)*$/D', $text)) {
+            return [0]; // Malformed opt-in denies staffing access, never widens it.
+        }
+
+        return array_map('intval', explode(',', $text));
+    })(),
     'enabled' => (bool) env('GATE_ENABLED', false),
     'operator_enabled' => (bool) env('GATE_OPERATOR_ENABLED', false),
     'setup_enabled' => (bool) env('GATE_SETUP_ENABLED', false),

@@ -17,7 +17,7 @@ final class AccountInvitations
     private function pending(?AdminUser $account): bool
     {
         return $account && $account->role === 'school_admin' && $account->gate_only === true
-            && ! $account->test_recovery_only && ! $account->is_active && $account->email_verified_at === null
+            && ! $account->gate_source_only && ! $account->test_recovery_only && ! $account->is_active && $account->email_verified_at === null
             && $account->last_login_at === null
             && (app(RegistryAccess::class)->schools($account)->exists() || app(SetupAccess::class)->schools($account)->exists());
     }

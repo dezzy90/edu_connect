@@ -28,6 +28,8 @@ final class GateWorkspaceController extends Controller
             $q->on('s.id', '=', 'd.student_id')->on('s.tenant_id', '=', 'd.tenant_id');
         })->where('d.tenant_id', $school->tenant_id)->where('d.school_id', $school->school_id)->where('d.day', $date)
             ->select('d.id', 'd.student_id', 'd.day', 'd.state', 'd.revision', 's.first_name', 's.last_name', 's.student_number')
+            ->when($actor->gate_source_only && array_key_exists((int) $school->school_id, app(\App\Services\Biometrics\Gate\SourceWorkspaceContext::class)->studentsBySchool),
+                fn ($q) => $q->whereIn('d.student_id', app(\App\Services\Biometrics\Gate\SourceWorkspaceContext::class)->studentsBySchool[(int) $school->school_id]))
             ->orderBy('s.last_name')->orderBy('d.id')->paginate(50)->withQueryString();
 
         return $this->reply($request, ['schools' => $schools, 'selectedSchool' => $school, 'selectedDay' => $date,

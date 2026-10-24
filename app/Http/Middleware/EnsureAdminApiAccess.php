@@ -15,6 +15,7 @@ class EnsureAdminApiAccess
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
+        abort_if($user instanceof AdminUser && $user->gate_source_only, 403, 'Use your existing EduAdmin login.');
 
         if (!$user instanceof AdminUser) {
             return response()->json([
