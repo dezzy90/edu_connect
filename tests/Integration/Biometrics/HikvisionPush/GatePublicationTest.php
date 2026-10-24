@@ -75,6 +75,15 @@ it('publishes an immutable saved school revision with prospective policies and n
     Http::assertNothingSent();
 });
 
+it('uses the opted-in secretary staffing model for primary nursery and secondary', function (string $type, bool $ready): void {
+    config(['gate.secretary_complex_ids' => [$this->f['tenant']->id]]);
+    DB::table('ec_schools')->where('id', $this->f['school']->id)->update(['type' => $type]);
+    DB::table('ec_gate_operator_assignments')->where('role', 'guard')->update(['role' => 'secretary']);
+    DB::table('ec_gate_operator_assignments')->where('role', 'discipline_master')->delete();
+    $response = $this->getJson('/api/admin/v2/gate/setup')->assertOk();
+    expect(collect($response->json('data.activation.checks'))->firstWhere('key', 'staff')['ok'])->toBe($ready);
+})->with([['primary', true], ['nursery', true], ['secondary', false]]);
+
 it('does not infer activation authority from a draft or super administrator role', function (): void {
     $this->actor->update(['role' => 'super_admin']);
     DB::table('ec_gate_activation_assignments')->delete();

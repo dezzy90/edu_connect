@@ -10,11 +10,13 @@ use Illuminate\Support\Facades\DB;
 
 final class OperatorAccess
 {
-    public const ROLES = ['guard', 'discipline_master', 'correction_approver'];
+    public const ROLES = ['guard', 'secretary', 'discipline_master', 'correction_approver', 'attendance_viewer'];
 
     public function actor(mixed $actor): AdminUser
     {
         abort_unless($actor instanceof AdminUser && $actor->is_active && ! $actor->test_recovery_only, 403);
+        abort_if($actor->gate_source_only && (! app()->bound(SourceWorkspaceContext::class)
+            || app(SourceWorkspaceContext::class)->actorId !== (int) $actor->id), 403);
         abort_unless(config('gate.enabled') && config('gate.operator_enabled'), 409, 'Gate workspace is disabled.');
         $schools = config('gate.school_ids');
         abort_unless(is_array($schools) && array_is_list($schools) && $schools !== []
@@ -25,17 +27,21 @@ final class OperatorAccess
 
     public function assignments(AdminUser $actor): Builder
     {
-        return DB::table('ec_gate_operator_assignments as a')->join('ec_schools as s', function ($q): void {
+        return StaffingPolicy::restrict(DB::table('ec_gate_operator_assignments as a')->join('ec_schools as s', function ($q): void {
             $q->on('s.id', '=', 'a.school_id')->on('s.tenant_id', '=', 'a.tenant_id');
         })->join('ec_tenants as t', 't.id', '=', 'a.tenant_id')
             ->where('a.admin_id', $actor->id)->where('a.active', true)->whereIn('a.role', self::ROLES)
             ->whereIn('a.school_id', config('gate.school_ids'))->where('s.status', 'active')->whereNull('s.deleted_at')
-            ->where('t.status', 'active')->whereNull('t.deleted_at');
+            ->where('t.status', 'active')->whereNull('t.deleted_at'));
     }
 
     public function roles(AdminUser $actor, object $day, bool $locked = false): array
     {
         $this->actor($actor);
+        if ($actor->gate_source_only && isset($day->student_id)) {
+            $scope = app(SourceWorkspaceContext::class)->studentsBySchool;
+            abort_if(array_key_exists((int) $day->school_id, $scope) && ! in_array((int) $day->student_id, $scope[(int) $day->school_id], true), 404);
+        }
         if ($locked) {
             // The caller locks the day first, as does the asynchronous projector.
             $fresh = AdminUser::whereKey($actor->id)->lockForUpdate()->first();

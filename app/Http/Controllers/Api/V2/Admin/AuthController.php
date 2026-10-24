@@ -24,7 +24,7 @@ class AuthController extends Controller
             ->where('email', strtolower($validated['email']))
             ->first();
 
-        if (!$admin || !Hash::check($validated['password'], $admin->password)) {
+        if (!$admin || $admin->gate_source_only || !Hash::check($validated['password'], $admin->password)) {
             throw ValidationException::withMessages([
                 'email' => 'The supplied credentials are invalid.',
             ]);

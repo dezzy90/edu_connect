@@ -13,6 +13,7 @@ final class RestrictGateOnlyAccount
     public function handle(Request $request, Closure $next): Response
     {
         $admin = Auth::guard('admin')->user();
+        abort_if($admin?->gate_source_only, 403, 'Use your existing EduAdmin login.');
         // Durable even when gate features or the assignment have been disabled.
         if ($admin?->gate_only) {
             if ($request->isMethod('post') && $request->is('admin/logout')) {

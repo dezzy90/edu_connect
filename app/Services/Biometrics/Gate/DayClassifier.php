@@ -42,7 +42,7 @@ final class DayClassifier
         foreach ($actions as $action) {
             if ($scope === null || [$action['tenant_id'], $action['school_id'], $action['student_id']] !== array_slice($scope, 0, 3)
                 || ! in_array($action['kind'] ?? null, ['resolve', 'permit_exit', 'exclude'], true)
-                || ! in_array($action['role'] ?? null, $action['kind'] === 'exclude' ? ['discipline_master', 'correction_approver'] : ['guard', 'discipline_master'], true)
+                || ! in_array($action['role'] ?? null, $action['kind'] === 'exclude' ? ['discipline_master', 'correction_approver'] : ['guard', 'secretary', 'discipline_master'], true)
                 || ! preg_match('/^[a-f0-9]{64}$/D', $action['id'] ?? '') || ! is_int($action['actor_id'] ?? null)
                 || $action['actor_id'] < 1 || ! preg_match('/^[a-z0-9_]{1,64}$/D', $action['reason_code'] ?? '')) {
                 throw new InvalidArgumentException('Explicit scoped operator action required.');
@@ -176,7 +176,8 @@ final class DayClassifier
                 }
             }
             if ($action !== null && $status === 'movement') {
-                $decisionSource = $action['role'];
+                // Source contracts retain guard-style provenance; the immutable action retains the actual secretary role.
+                $decisionSource = $action['role'] === 'secretary' ? 'guard' : $action['role'];
             }
             $blocked = $blocked || $status === 'review';
             $decisions[$key] = ['status' => $status, 'reason' => $reason, 'policy_version' => $p['version']];

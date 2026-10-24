@@ -41,12 +41,12 @@ final class SetupPublications
             ['key' => 'active_publication', 'ok' => ! $current || $current->state !== 'active', 'message' => 'Pause the active publication before scheduling a replacement. Replacements begin on a later local day.'],
         ];
         // Count staff independently of the bounded UI list.
-        $roles = DB::table('ec_gate_operator_assignments as a')->join('admin_users as u', 'u.id', '=', 'a.admin_id')
-            ->where('a.tenant_id', $school->tenant_id)->where('a.school_id', $school->school_id)->where('a.active', true)
-            ->where('u.is_active', true)->where('u.test_recovery_only', false)->whereIn('a.role', ['guard', 'discipline_master'])->distinct()->pluck('a.role')->all();
+        $roles = StaffingPolicy::staff((int) $school->tenant_id, (int) $school->school_id)->distinct()->pluck('a.role')->all();
+        $staffing = StaffingPolicy::requirement((int) $school->tenant_id, (int) $school->school_id);
         foreach ($baseChecks as &$check) {
             if ($check['key'] === 'staff') {
-                $check['ok'] = in_array('guard', $roles, true) && in_array('discipline_master', $roles, true);
+                $check['ok'] = StaffingPolicy::satisfied($staffing, $roles);
+                $check['message'] = $staffing['message'];
             }
         }
         unset($check);
