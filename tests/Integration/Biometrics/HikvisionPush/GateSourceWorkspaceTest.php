@@ -24,6 +24,52 @@ beforeEach(function () {
 });
 afterEach(fn () => Carbon::setTestNow());
 
+function onboardingSourceFixture(object $test): int {
+    (require base_path('database/migrations/2026_10_24_000030_create_gate_parent_alerts.php'))->up();
+    $test->f['student']->forceFill(['source_system' => 'edu_admin', 'source_id' => '2934', 'device_sync_enabled' => true])->save();
+    config(['gate.parent_push_enabled' => true, 'educonnect.notifications.push_transport' => 'provider']);
+    DB::table('ec_gate_parent_alert_settings')->insert(['tenant_id' => $test->f['tenant']->id, 'school_id' => $test->f['school']->id,
+        'arrivals_enabled' => true, 'departures_enabled' => true, 'effective_from' => '2026-10-19 00:00:00', 'revision' => 1, 'updated_by' => 1, 'created_at' => now(), 'updated_at' => now()]);
+    $parent = GateFixture::parent($test->f);
+    DB::table('ec_mobile_push_tokens')->insert(['parent_account_id' => $parent->id, 'token' => 'SYNTHETIC-PRIVATE-PHONE-TOKEN', 'provider' => 'fcm', 'platform' => 'android', 'created_at' => now(), 'updated_at' => now()]);
+    $test->body['operation'] = 'parent_onboarding';
+    return $parent->id;
+}
+
+it('returns scoped parent setup counts without codes phone identities or tokens', function () {
+    $parentId = onboardingSourceFixture($this);
+    $reply = $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonCount(1, 'data.students')
+        ->assertJsonPath('data.students.0.student_id', 2934)->assertJsonPath('data.students.0.linked_parents', 1)->assertJsonPath('data.students.0.phone_ready_parents', 1)
+        ->assertJsonPath('data.arrivals_enabled', true);
+    expect($reply->getContent())->not->toContain('SYNTHETIC-PRIVATE-PHONE-TOKEN')->not->toContain('SYNTHETIC-PARENT')->not->toContain('linking_code');
+    DB::table('ec_notification_preferences')->insert(['parent_account_id' => $parentId, 'category' => 'attendance', 'push_enabled' => false, 'in_app_enabled' => true]);
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonPath('data.students.0.linked_parents', 1)->assertJsonPath('data.students.0.phone_ready_parents', 0);
+    DB::table('ec_parent_accounts')->where('id', $parentId)->update(['status' => 'inactive']);
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonPath('data.students.0.linked_parents', 0);
+});
+
+it('filters parent setup to fresh class master scope and does not treat revoked phone registrations as ready', function () {
+    onboardingSourceFixture($this);
+    DB::table('ec_mobile_push_tokens')->update(['revoked_at' => now()]);
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonPath('data.students.0.phone_ready_parents', 0);
+    $this->body['actor']['schools'][0] = ['id' => 26, 'roles' => ['attendance_viewer'], 'class_ids' => [9999]];
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonCount(0, 'data.students');
+    $this->body['actor']['schools'][0]['class_ids'] = [];
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertUnprocessable();
+});
+
+it('keeps parent onboarding read only and excludes retired students and links', function () {
+    onboardingSourceFixture($this);
+    $before = DB::table('ec_parent_student_links')->count();
+    DB::table('ec_parent_student_links')->update(['status' => 'revoked']);
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonPath('data.students.0.linked_parents', 0);
+    expect(DB::table('ec_parent_student_links')->count())->toBe($before)->and(DB::table('ec_mobile_notifications')->count())->toBe(0);
+    $this->f['student']->forceFill(['mobile_visible' => false])->save();
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonPath('data.students.0.mobile_available', false);
+    $this->f['student']->forceFill(['device_sync_enabled' => false])->save();
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonCount(0, 'data.students');
+});
+
 it('requires explicit source setup permissions and revokes them on refresh', function () {
     config(['gate.setup_enabled' => true, 'gate.setup_school_ids' => [$this->f['school']->id]]);
     $this->body['operation'] = 'setup';
