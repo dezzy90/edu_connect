@@ -29,14 +29,14 @@ final class PushPayload
         return $decoded;
     }
 
-    public static function event(array $envelope): array
+    public static function event(array $envelope, bool $allowOpenEnd = false): array
     {
         $text = self::text($envelope);
         if (($envelope['dataFormat'] ?? null) === 'boundaryData') {
             $events = [];
-            foreach (PushMultipart::metadataParts($text, (bool) config('hikvision_push.allow_open_multipart_end', false)) as $part) {
+            foreach (PushMultipart::metadataParts($text, $allowOpenEnd || (bool) config('hikvision_push.allow_open_multipart_end', false)) as $part) {
                 try {
-                    $events[] = self::event($part);
+                    $events[] = self::event($part, $allowOpenEnd);
                 } catch (InvalidArgumentException $error) {
                     // Status/other metadata is not a gate event. Binary parts never enter here.
                 }

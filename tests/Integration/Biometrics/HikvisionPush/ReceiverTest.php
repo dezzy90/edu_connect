@@ -413,6 +413,58 @@ it('requires explicit test-runtime opt-in for the observed open final multipart 
     }
 })->with([true, false]);
 
+it('limits production multipart compatibility to the explicit pinned device profile', function (string $variant, bool $accepted): void {
+    config(['hikvision_push.allow_open_multipart_end' => false]);
+    $model = $variant === 'other-model' ? 'OTHER-MODEL' : 'DS-K1T342MFWX-E1';
+    $firmware = $variant === 'other-firmware' ? 'V4.48.40_build260629' : 'V4.48.0_build260417';
+    DB::table('ec_hikvision_push_devices')->where('id', $this->pushId)->update(compact('model', 'firmware'));
+    $profile = ['allow_open_multipart_end' => true, 'model' => 'DS-K1T342MFWX-E1', 'firmware' => 'V4.48.0_build260417'];
+    if ($variant === 'disabled') {
+        $profile['allow_open_multipart_end'] = false;
+    }
+    if ($variant === 'string-flag') {
+        $profile['allow_open_multipart_end'] = 'true';
+    }
+    if ($variant === 'wrong-profile-model') {
+        $profile['model'] = 'OTHER-MODEL';
+    }
+    if ($variant === 'wrong-profile-firmware') {
+        $profile['firmware'] = 'V4.48.0_build000000';
+    }
+    $this->graph['device']->update(['settings' => $variant === 'missing' ? [] : ['hikvision_event_compat' => $profile]]);
+    $terminal = hkPushTerminal($this);
+    $terminal->connect()->assertOk();
+    $metadata = base64_decode(PushTerminalSimulator::scan()['eventList'][0]['data']);
+    $parts = [['application/json', $metadata, 'event.json'], ['image/jpeg', 'DO-NOT-STORE-IMAGE', 'face.jpg']];
+    if ($variant === 'ambiguous') {
+        $parts[] = ['application/json', $metadata, 'second.json'];
+    }
+    $entry = hkPushMultipart($parts);
+    $text = str_replace("--SYNTHETIC-HK-BOUNDARY--\r\n", "--SYNTHETIC-HK-BOUNDARY\r\n", base64_decode($entry['data']));
+    if ($variant === 'trailing-junk') {
+        $text .= 'JUNK';
+    }
+    if ($variant === 'truncated') {
+        $text = substr($text, 0, -10);
+    }
+    $entry['data'] = base64_encode($text);
+    $terminal->send('Event', ['eventNum' => 1, 'eventList' => [$entry]])->assertOk();
+    expect(DB::table('ec_hikvision_observations')->count())->toBe($accepted ? 1 : 0);
+    expect(DB::table('ec_hikvision_push_deliveries')->value('status'))->toBe($accepted ? 'recognition_candidate' : 'held_invalid_payload');
+    expect(config('hikvision_push.allow_open_multipart_end'))->toBeFalse();
+    if ($accepted) {
+        $saved = DB::table('ec_hikvision_observations')->sole();
+        expect($saved->delivery_state)->toBe('held_hardware_acceptance');
+        expect($saved->metadata)->not->toContain('DO-NOT-STORE', 'face.jpg');
+    }
+    expect(DB::table('ec_attendance_events')->count())->toBe(0);
+    Http::assertNothingSent();
+})->with([
+    ['approved', true], ['missing', false], ['disabled', false], ['string-flag', false],
+    ['other-model', false], ['other-firmware', false], ['wrong-profile-model', false], ['wrong-profile-firmware', false],
+    ['ambiguous', false], ['trailing-junk', false], ['truncated', false],
+]);
+
 it('keeps incomplete ambiguous and malformed open-end variants held even with test compatibility', function (string $variant): void {
     config(['hikvision_push.allow_open_multipart_end' => true]);
     $terminal = hkPushTerminal($this);

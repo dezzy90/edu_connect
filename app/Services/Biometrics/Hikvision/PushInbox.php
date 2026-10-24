@@ -36,7 +36,7 @@ class PushInbox
         $observationId = null;
         $status = 'held_invalid_payload';
         try {
-            $observation = PushObservation::normalize($device, PushPayload::event($entry));
+            $observation = PushObservation::normalize($device, PushPayload::event($entry, $this->allowOpenEnd($device)));
             $existing = DB::table('ec_hikvision_observations')->where('event_key', $observation['event_key'])->first();
             if ($existing) {
                 $observationId = $existing->id;
@@ -103,6 +103,20 @@ class PushInbox
         ]);
 
         return self::ack($uuid, $status === 'held_content_conflict' ? 409 : 200);
+    }
+
+    private function allowOpenEnd(object $device): bool
+    {
+        // An operator-approved compatibility profile is not an enrollment or door-right grant.
+        // Keep the global parser strict and fail closed on a model/firmware change.
+        if ($device->model !== 'DS-K1T342MFWX-E1' || $device->firmware !== 'V4.48.0_build260417') {
+            return false;
+        }
+        $settings = json_decode(DB::table('ec_biometric_devices')->where('id', $device->device_id)->value('settings') ?? '{}', true, 32, JSON_THROW_ON_ERROR);
+        $profile = is_array($settings) ? ($settings['hikvision_event_compat'] ?? null) : null;
+
+        return is_array($profile) && ($profile['allow_open_multipart_end'] ?? null) === true
+            && ($profile['model'] ?? null) === $device->model && ($profile['firmware'] ?? null) === $device->firmware;
     }
 
     private static function ack(string $uuid, int $status): array
