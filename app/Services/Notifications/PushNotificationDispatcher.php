@@ -114,8 +114,56 @@ class PushNotificationDispatcher
         return $stats;
     }
 
+    public function enqueueGatePending(int $limit = 100): int
+    {
+        $count = 0;
+        MobileNotification::query()->where('data->source', 'gate')->whereIn('school_id', config('gate.school_ids', []))
+            ->whereIn('channel', self::PUSH_CHANNELS)->whereIn('delivery_status', ['queued', 'failed'])->visible()->oldest()->limit($limit)->get()
+            ->each(function (MobileNotification $notification) use (&$count): void {
+                if (\App\Services\Biometrics\Gate\GatePushDelivery::allowed($notification)) $count += $this->enqueueNotification($notification);
+            });
+        return $count;
+    }
+
+    public function dispatchGateQueued(int $limit = 100): array
+    {
+        $stats = ['sent' => 0, 'failed' => 0, 'skipped' => 0];
+        NotificationDelivery::query()->with(['notification', 'pushToken'])
+            ->whereHas('notification', fn (Builder $q) => $q->where('data->source', 'gate')->whereIn('school_id', config('gate.school_ids', [])))
+            ->where(fn (Builder $q) => $q->where('status', 'queued')->orWhere(fn (Builder $q) => $q->where('status', 'failed')
+                ->where('attempts', '<', $this->maxAttempts())->where(fn (Builder $q) => $q->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now()))))
+            ->oldest('queued_at')->orderBy('id')->limit($limit)->get()->each(function (NotificationDelivery $delivery) use (&$stats): void { $this->dispatchDelivery($delivery, $stats); });
+        return $stats;
+    }
+
     private function dispatchDelivery(NotificationDelivery $delivery, array &$stats): void
     {
+        if (($delivery->notification?->data['source'] ?? null) !== 'gate') {
+            $this->dispatchDeliveryCore($delivery, $stats);
+            return;
+        }
+        $lease = \App\Services\Biometrics\Gate\GatePushDelivery::claim($delivery);
+        if (! $lease) return;
+        try {
+            if (! \App\Services\Biometrics\Gate\GatePushDelivery::allowed($delivery->notification)) {
+                $this->skip($delivery, 'Gate alert is no longer eligible for this linked parent.');
+                $stats['skipped']++;
+                return;
+            }
+            $this->dispatchDeliveryCore($delivery, $stats);
+        } catch (\Throwable) {
+            // Gate retries must never retain HTTP exceptions containing credentials or payloads.
+            $delivery->refresh()->forceFill(['status' => 'failed', 'failed_at' => now(), 'last_error' => 'Gate phone alert delivery is temporarily unavailable.',
+                'next_attempt_at' => $delivery->attempts < $this->maxAttempts() ? now()->addSeconds($this->retryDelaySeconds($delivery->attempts)) : null])->save();
+            $stats['failed']++;
+        } finally {
+            \App\Services\Biometrics\Gate\GatePushDelivery::release($delivery->id, $lease);
+        }
+    }
+
+    private function dispatchDeliveryCore(NotificationDelivery $delivery, array &$stats): void
+    {
+        $delivery->load('pushToken');
         $delivery->forceFill([
             'attempts' => $delivery->attempts + 1,
         ])->save();
@@ -129,6 +177,13 @@ class PushNotificationDispatcher
         if (!$delivery->pushToken || $delivery->pushToken->revoked_at) {
             $this->skip($delivery, 'Push token is missing or revoked.');
             $stats['skipped']++;
+            return;
+        }
+
+        if ((int) $delivery->pushToken->parent_account_id !== (int) $delivery->notification->parent_account_id) {
+            $this->skip($delivery, 'Push token belongs to a different parent account.');
+            $stats['skipped']++;
+
             return;
         }
 

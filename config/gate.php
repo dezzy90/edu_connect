@@ -48,5 +48,5 @@ return [
     })(),
     'mirror_delivery_enabled' => (bool) env('GATE_MIRROR_DELIVERY_ENABLED', false),
     'parent_delivery_enabled' => (bool) env('GATE_PARENT_DELIVERY_ENABLED', false),
-    'parent_push_enabled' => false,
+    'parent_push_enabled' => (bool) env('GATE_PARENT_PUSH_ENABLED', false),
 ];

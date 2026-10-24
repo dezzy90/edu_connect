@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <phpunit bootstrap="vendor/autoload.php" colors="true" cacheDirectory=".phpunit.cache/gate-release">
-  <testsuites><testsuite name="Production gate release"><directory>tests/Integration/Biometrics/HikvisionPush</directory><file>tests/Unit/GateAssetRoutingTest.php</file></testsuite></testsuites>
+  <testsuites><testsuite name="Production gate release"><directory>tests/Integration/Biometrics/HikvisionPush</directory><file>tests/Unit/GateAssetRoutingTest.php</file><file>tests/Unit/V2/PushNotificationTransportTest.php</file></testsuite></testsuites>
   <php>
     <env name="APP_ENV" value="testing" force="true"/><env name="APP_DEBUG" value="false" force="true"/>
     <env name="APP_KEY" value="base64:QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=" force="true"/>

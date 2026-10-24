@@ -196,11 +196,16 @@ class SyncCoordinator
         if (($flags['gate_only_sync'] ?? false) !== true) {
             return $requested ?: self::INCREMENTAL_RESOURCES;
         }
-        if (array_diff($requested, self::GATE_RESOURCES) !== []) {
+        if (array_key_exists('gate_parent_links_enabled', $flags) && ! is_bool($flags['gate_parent_links_enabled'])) {
+            throw new \InvalidArgumentException('Gate parent access requires an explicit boolean opt-in.');
+        }
+        $gateResources = self::GATE_RESOURCES;
+        if (($flags['gate_parent_links_enabled'] ?? false) === true) $gateResources[] = 'parent_links';
+        if (array_diff($requested, $gateResources) !== []) {
             throw new \InvalidArgumentException('Gate-only connections cannot import unrelated source resources.');
         }
 
-        return $requested ?: self::GATE_RESOURCES;
+        return $requested ?: $gateResources;
     }
 
     public function importResourceRecords(IntegrationConnection $connection, string $resource, iterable $records): array

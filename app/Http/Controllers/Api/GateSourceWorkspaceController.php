@@ -37,7 +37,7 @@ final class GateSourceWorkspaceController extends Controller
         abort_unless(DB::table('ec_gate_staff_nonces')->insertOrIgnore(['id' => hash('sha256', $id.'|'.$nonce), 'expires_at' => now()->addMinutes(3)]) === 1, 409, 'This signed request was already used.');
         DB::table('ec_gate_staff_nonces')->where('expires_at', '<', now())->delete();
         $input = $request->validate([
-            'complex_id' => ['required', 'integer', 'min:1'], 'operation' => ['required', Rule::in(['status', 'days', 'detail', 'action', 'setup', 'save_setup', 'activate', 'pause'])],
+            'complex_id' => ['required', 'integer', 'min:1'], 'operation' => ['required', Rule::in(['status', 'days', 'detail', 'action', 'setup', 'save_setup', 'save_alerts', 'activate', 'pause'])],
             'actor' => ['required', 'array:id,name,schools'], 'actor.id' => ['required', 'integer', 'min:1'],
             'actor.name' => ['required', 'string', 'max:150'], 'actor.schools' => ['required', 'array', 'min:1', 'max:100'],
             'actor.schools.*' => ['required', 'array:id,roles,class_ids,permissions'], 'actor.schools.*.id' => ['required', 'integer', 'min:1', 'distinct'],
@@ -90,13 +90,15 @@ final class GateSourceWorkspaceController extends Controller
         $context->permissionsBySchool = $permissions;
         app()->instance(SourceWorkspaceContext::class, $context);
         try {
-            if (in_array($input['operation'], ['setup', 'save_setup', 'activate', 'pause'], true)) {
+            if (in_array($input['operation'], ['setup', 'save_setup', 'save_alerts', 'activate', 'pause'], true)) {
                 abort_unless($context->allows($actor, $schoolId, 'configure'), 403);
                 if (in_array($input['operation'], ['activate', 'pause'], true)) abort_unless($context->allows($actor, $schoolId, 'activate'), 403);
                 $inner = Request::create('/internal-gate-setup', 'POST', [], [], [],
                     ['HTTP_ACCEPT' => 'application/json', 'CONTENT_TYPE' => 'application/json'], json_encode($input['setup_body'] ?? [], JSON_THROW_ON_ERROR));
                 $inner->setUserResolver(fn () => $actor);
                 $controller = app(GateSetupController::class);
+                if ($input['operation'] === 'save_alerts') return response()->json(['data' => app(\App\Services\Biometrics\Gate\ParentAlertSettings::class)
+                    ->save($actor, $schoolId, $input['setup_body'] ?? [])])->header('Cache-Control', 'private, no-store');
                 if ($input['operation'] === 'setup') {
                     $data = app(\App\Services\Biometrics\Gate\SetupDrafts::class)->read($actor, $schoolId);
                     // Do not expose separate application URLs, source endpoints or paginated student records.
