@@ -23,6 +23,7 @@ final class SetupAccess
     public function actor(mixed $actor): AdminUser
     {
         abort_unless($actor instanceof AdminUser && $actor->is_active && ! $actor->test_recovery_only, 403);
+        abort_if($actor->gate_source_only && app(SourceWorkspaceContext::class)->actorId !== (int) $actor->id, 403);
         abort_unless($this->enabled(), 409, 'School setup is disabled or its preparation scope is not configured.');
 
         return $actor;
@@ -30,11 +31,16 @@ final class SetupAccess
 
     public function schools(AdminUser $actor): Builder
     {
-        return DB::table('ec_gate_setup_assignments as a')->join('ec_schools as s', function ($q): void {
+        $query = DB::table('ec_gate_setup_assignments as a')->join('ec_schools as s', function ($q): void {
             $q->on('s.id', '=', 'a.school_id')->on('s.tenant_id', '=', 'a.tenant_id');
         })->join('ec_tenants as t', 't.id', '=', 'a.tenant_id')
             ->where('a.admin_id', $actor->id)->where('a.active', true)->whereIn('a.school_id', config('gate.setup_school_ids', []))
             ->where('s.status', 'active')->whereNull('s.deleted_at')->where('t.status', 'active')->whereNull('t.deleted_at');
+        if ($actor->gate_source_only) {
+            $ids = array_keys(array_filter(app(SourceWorkspaceContext::class)->permissionsBySchool, fn ($p) => in_array('configure', $p, true)));
+            $query->whereIn('a.school_id', app(SourceWorkspaceContext::class)->actorId === (int) $actor->id ? $ids : []);
+        }
+        return $query;
     }
 
     public function school(AdminUser $actor, int $school, bool $locked = false): object

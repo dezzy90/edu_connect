@@ -1,6 +1,11 @@
 <?php
 
 return [
+    // Explicit recording-first release: staff corrections remain disabled in these schools.
+    'recording_only_school_ids' => (static function (): array {
+        $text = trim((string) env('GATE_RECORDING_ONLY_SCHOOL_IDS', ''));
+        return preg_match('/^[1-9]\d*(?:,[1-9]\d*)*$/D', $text) ? array_values(array_unique(array_map('intval', explode(',', $text)))) : [];
+    })(),
     'account_invites_enabled' => (bool) env('GATE_ACCOUNT_INVITES_ENABLED', false),
     // Opt-in complex staffing: secretaries operate all explicitly assigned schools; DMs only secondary.
     'secretary_complex_ids' => (static function (): array {

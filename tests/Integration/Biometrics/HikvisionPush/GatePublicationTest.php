@@ -56,6 +56,24 @@ afterEach(function (): void {
     $this->travelBack();
 });
 
+it('schedules Monday recording before the weekend ends without requiring a DM or generating scans', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-10-24T10:00:00Z'));
+    config(['gate.recording_only_school_ids' => [$this->f['school']->id]]);
+    DB::table('ec_gate_operator_assignments')->delete();
+    DB::table('ec_hikvision_push_sessions')->update(['expires_at' => now()->timestamp + 300, 'last_seen_at' => now()]);
+    $this->c = array_replace($this->c, ['weekdays' => [1, 2, 3, 4, 5], 'arrival_start' => '06:15:00',
+        'arrival_end' => '14:00:00', 'normal_arrival_end' => '07:30:59', 'late_cutoff' => '07:40:00', 'late_at_cutoff' => true,
+        'departure_start' => '14:00:00', 'departure_end' => '18:00:00']);
+    $this->postJson($this->url, ['expected_revision' => 1, 'idempotency_key' => 'SYNTHETIC-Monday-draft', 'configuration' => $this->c])->assertOk();
+    $this->body['expected_revision'] = 2; $this->body['starts_on'] = '2026-10-26';
+    $this->postJson($this->url.'/activate', $this->body)->assertOk();
+    expect(DB::table('ec_gate_policies')->where('day', '<', '2026-10-26')->count())->toBe(0);
+    $monday = DB::table('ec_gate_policies')->where('day', '2026-10-26')->sole();
+    expect(json_decode($monday->snapshot, true))->toMatchArray(['closed' => false, 'arrival_start' => '06:15:00', 'late_cutoff' => '07:40:00']);
+    expect(DB::table('ec_gate_movements')->count())->toBe(0);
+    config(['gate.recording_only_school_ids' => []]);
+});
+
 it('publishes an immutable saved school revision with prospective policies and no device commands', function (): void {
     $this->getJson('/api/admin/v2/gate/setup')->assertOk()->assertJsonPath('data.activation.can_activate', true);
     $before = DB::table('ec_biometric_devices')->sole()->settings;
