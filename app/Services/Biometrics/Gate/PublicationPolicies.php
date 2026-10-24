@@ -61,7 +61,11 @@ final class PublicationPolicies
         $c = json_decode($p->configuration, true, 16, JSON_THROW_ON_ERROR);
         $today = CarbonImmutable::now($c['timezone'])->startOfDay();
         // Yesterday recovers an already-approved day after a scheduler outage. Never pre-activation.
-        foreach ([-1, 0, 1] as $offset) {
+        // Also prepare an explicitly approved start within the coming week (e.g. Monday on Saturday).
+        $offsets = [-1, 0, 1];
+        $startOffset = (int) $today->diffInDays(CarbonImmutable::parse($p->starts_on, $c['timezone']), false);
+        if ($startOffset > 1 && $startOffset <= 7) $offsets[] = $startOffset;
+        foreach ($offsets as $offset) {
             $day = $today->addDays($offset)->format('Y-m-d');
             if ($day < $p->starts_on || $day < CarbonImmutable::parse($p->activated_at, 'UTC')->setTimezone($c['timezone'])->format('Y-m-d')) {
                 continue;

@@ -12,7 +12,7 @@ uses(Tests\TestCase::class);
 
 beforeEach(function () {
     $this->f = GateFixture::boot();
-    foreach (['2026_10_19_000021_create_hikvision_enrollments.php', '2026_10_20_000023_add_gate_only_account_restriction.php', '2026_10_21_000025_create_device_registry.php', '2026_10_22_000027_create_gate_publications.php', '2026_10_24_000029_create_gate_source_workspace.php'] as $file) (require base_path('database/migrations/'.$file))->up();
+    foreach (['2026_10_19_000021_create_hikvision_enrollments.php', '2026_10_20_000023_add_gate_only_account_restriction.php', '2026_10_21_000024_create_gate_setup_drafts.php', '2026_10_21_000025_create_device_registry.php', '2026_10_22_000027_create_gate_publications.php', '2026_10_24_000029_create_gate_source_workspace.php'] as $file) (require base_path('database/migrations/'.$file))->up();
     Carbon::setTestNow('2026-10-20T09:00:00Z');
     config(['gate_workspace.enabled' => true, 'gate.operator_enabled' => true, 'gate.secretary_complex_ids' => [$this->f['tenant']->id]]);
     $this->f['policy']['operator_rules'] = ['early_exit' => ['reason_codes' => ['synthetic_release'], 'validity_seconds' => 120, 'required_checks' => ['synthetic_identity']]];
@@ -23,6 +23,37 @@ beforeEach(function () {
     $this->url = 'https://localhost/api/integrations/edu-admin/gate-workspace';
 });
 afterEach(fn () => Carbon::setTestNow());
+
+it('requires explicit source setup permissions and revokes them on refresh', function () {
+    config(['gate.setup_enabled' => true, 'gate.setup_school_ids' => [$this->f['school']->id]]);
+    $this->body['operation'] = 'setup';
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertForbidden();
+    $this->body['actor']['schools'][0] = ['id' => 26, 'roles' => ['attendance_viewer'], 'permissions' => ['configure', 'activate']];
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertOk()->assertJsonPath('data.draft.revision', 0);
+    expect(DB::table('ec_gate_setup_assignments')->where('active', true)->count())->toBe(1);
+    $actor = AdminUser::sole();
+    expect(fn () => app(\App\Services\Biometrics\Gate\SetupAccess::class)->actor($actor))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    $this->body['actor']['schools'][0]['permissions'] = [];
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertForbidden();
+    expect(DB::table('ec_gate_setup_assignments')->where('active', true)->count())->toBe(0);
+    expect(DB::table('ec_gate_activation_assignments')->where('active', true)->count())->toBe(0);
+});
+
+it('does not allow class-scoped viewers to acquire configuration authority', function () {
+    $this->body['actor']['schools'][0] = ['id' => 26, 'roles' => ['attendance_viewer'], 'class_ids' => [99], 'permissions' => ['configure']];
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertForbidden();
+    expect(DB::table('ec_gate_setup_assignments')->count())->toBe(0);
+});
+
+it('keeps DM-only corrections disabled even when the authenticated actor has the DM role', function () {
+    config(['gate.recording_only_school_ids' => [$this->f['school']->id]]);
+    $this->body['operation'] = 'action'; $this->body['day_id'] = DB::table('ec_gate_days')->sole()->id;
+    $this->body['actor']['schools'][0]['roles'] = ['discipline_master'];
+    $this->body['action'] = ['operation' => 'correct', 'expected_revision' => 1, 'idempotency_key' => 'SYNTHETIC-disabled-dm',
+        'reason_code' => 'synthetic', 'movement_id' => str_repeat('a', 64)];
+    $this->postJson($this->url, $this->body, signedGateHeaders($this->body))->assertForbidden();
+    expect(DB::table('ec_gate_actions')->count())->toBe(0);
+});
 
 function signedGateHeaders(array $body, ?string $nonce = null, ?string $stamp = null): array {
     $stamp ??= (string) now()->timestamp; $nonce ??= bin2hex(random_bytes(24));

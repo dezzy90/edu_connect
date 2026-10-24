@@ -29,7 +29,7 @@ final class SetupPublications
         $checks = [
             ['key' => 'authority', 'ok' => $grant, 'message' => 'An explicit school activation grant is required; saving drafts or being an administrator is not that grant.'],
             ['key' => 'release', 'ok' => config('gate.activation_enabled') === true && config('gate.activation_release_ready') === true,
-                'message' => 'Deployment operator must release the launch hold after certificate trust and production readiness are resolved. This switch is not a certificate fix.'],
+                'message' => 'The platform launch release must be approved. This switch does not fix or attest certificate trust.'],
             ['key' => 'runtime', 'ok' => $validScope && config('gate.enabled') === true && config('gate.operator_enabled') === true
                 && config('gate.mirror_delivery_enabled') === true && config('hikvision_push.enabled') === true,
                 'message' => 'Explicit school processing scope, staff screens, PushSDK receiver and EduAdmin gate delivery must be configured.'],
@@ -47,6 +47,10 @@ final class SetupPublications
             if ($check['key'] === 'staff') {
                 $check['ok'] = StaffingPolicy::satisfied($staffing, $roles);
                 $check['message'] = $staffing['message'];
+                if (in_array((int) $school->school_id, config('gate.recording_only_school_ids', []), true)) {
+                    $check['blocking'] = false;
+                    $check['message'] = 'Automatic recording is approved independently of staff sign-in. Existing secretaries may operate the gate; DM-only corrections remain disabled.';
+                }
             }
         }
         unset($check);
@@ -58,7 +62,8 @@ final class SetupPublications
         $checks[] = ['key' => 'class_days', 'ok' => $activeClasses === count($classIds),
             'message' => 'Additional class dates apply only to explicitly selected active EduAdmin classes in this school. No selection means no extra Saturday attendance.'];
 
-        return ['available' => true, 'can_activate' => ! array_filter($checks, static fn ($check) => ! $check['ok']),
+        return ['available' => true, 'can_activate' => ! array_filter($checks, static fn ($check) => ! $check['ok'] && ($check['blocking'] ?? true)),
+            'dm_corrections_enabled' => ! in_array((int) $school->school_id, config('gate.recording_only_school_ids', []), true),
             'can_pause' => $grant && $current?->state === 'active',
             'current' => $current ? $this->summary($current) : null, 'checks' => $checks];
     }
@@ -175,6 +180,7 @@ final class SetupPublications
 
     private function granted(AdminUser $actor, object $school, bool $locked = false): bool
     {
+        if ($actor->gate_source_only && ! app(SourceWorkspaceContext::class)->allows($actor, (int) $school->school_id, 'activate')) return false;
         $query = DB::table('ec_gate_activation_assignments')->where('tenant_id', $school->tenant_id)->where('school_id', $school->school_id)->where('admin_id', $actor->id)->where('active', true);
 
         return ($locked ? $query->lockForUpdate() : $query)->first() !== null;

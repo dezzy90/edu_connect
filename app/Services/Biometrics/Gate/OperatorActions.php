@@ -39,6 +39,8 @@ final class OperatorActions
             abort_unless($day, 404);
             $roles = app(OperatorAccess::class)->roles($actor, $day, true);
             $operation = $input['operation'];
+            abort_if(in_array((int) $day->school_id, config('gate.recording_only_school_ids', []), true)
+                && in_array($operation, ['correct', 'approve_correction'], true), 403, 'DM-only corrections are disabled for this school.');
             $permitted = match ($operation) {
                 'correct' => ['discipline_master'],
                 'approve_correction' => ['discipline_master', 'correction_approver'],

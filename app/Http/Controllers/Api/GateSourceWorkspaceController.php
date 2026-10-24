@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\V2\Admin\GateWorkspaceController;
+use App\Http\Controllers\Api\V2\Admin\GateSetupController;
 use App\Models\AdminUser;
 use App\Services\Biometrics\Gate\SourceWorkspaceContext;
 use App\Services\Biometrics\Gate\StaffingPolicy;
@@ -36,16 +37,19 @@ final class GateSourceWorkspaceController extends Controller
         abort_unless(DB::table('ec_gate_staff_nonces')->insertOrIgnore(['id' => hash('sha256', $id.'|'.$nonce), 'expires_at' => now()->addMinutes(3)]) === 1, 409, 'This signed request was already used.');
         DB::table('ec_gate_staff_nonces')->where('expires_at', '<', now())->delete();
         $input = $request->validate([
-            'complex_id' => ['required', 'integer', 'min:1'], 'operation' => ['required', Rule::in(['status', 'days', 'detail', 'action'])],
+            'complex_id' => ['required', 'integer', 'min:1'], 'operation' => ['required', Rule::in(['status', 'days', 'detail', 'action', 'setup', 'save_setup', 'activate', 'pause'])],
             'actor' => ['required', 'array:id,name,schools'], 'actor.id' => ['required', 'integer', 'min:1'],
             'actor.name' => ['required', 'string', 'max:150'], 'actor.schools' => ['required', 'array', 'min:1', 'max:100'],
-            'actor.schools.*' => ['required', 'array:id,roles,class_ids'], 'actor.schools.*.id' => ['required', 'integer', 'min:1', 'distinct'],
+            'actor.schools.*' => ['required', 'array:id,roles,class_ids,permissions'], 'actor.schools.*.id' => ['required', 'integer', 'min:1', 'distinct'],
+            'actor.schools.*.permissions' => ['sometimes', 'array', 'max:2'],
+            'actor.schools.*.permissions.*' => [Rule::in(['configure', 'activate'])],
             'actor.schools.*.class_ids' => ['sometimes', 'array', 'min:1', 'max:200'], 'actor.schools.*.class_ids.*' => ['integer', 'min:1'],
             'actor.schools.*.roles' => ['required', 'array', 'min:1', 'max:3'],
             'actor.schools.*.roles.*' => ['required', Rule::in(['secretary', 'discipline_master', 'attendance_viewer'])],
             'school_id' => ['required', 'integer', 'min:1'], 'day' => ['required', 'date_format:Y-m-d'],
             'page' => ['sometimes', 'integer', 'min:1', 'max:10000'], 'day_id' => ['sometimes', 'integer', 'min:1'],
             'action' => ['sometimes', 'array'],
+            'setup_body' => ['sometimes', 'array'], 'publication_id' => ['sometimes', 'integer', 'min:1'],
         ]);
         abort_unless((int) $bridge->source_complex_id === $input['complex_id'], 403);
         $connection = DB::table('ec_integration_connections as c')->join('ec_tenants as t', 't.id', '=', 'c.tenant_id')
@@ -55,7 +59,7 @@ final class GateSourceWorkspaceController extends Controller
             ->where('m.connection_id', $connection->id)->where('m.external_type', 'school')->where('m.local_type', 'school')->where('s.tenant_id', $connection->tenant_id)
             ->where('s.status', 'active')->whereNull('s.deleted_at')->get(['m.external_id', 's.id', 's.type']);
         $allowed = json_decode($connection->enabled_school_ids ?? '[]', true);
-        $scope = []; $classScopes = [];
+        $scope = []; $classScopes = []; $permissions = [];
         foreach ($input['actor']['schools'] as $grant) {
             $matches = $maps->where('external_id', (string) $grant['id']);
             if ($matches->isEmpty()) continue; // A newly created source school may not be connected yet.
@@ -65,8 +69,9 @@ final class GateSourceWorkspaceController extends Controller
             $roles = array_values(array_unique($grant['roles']));
             abort_if(in_array('discipline_master', $roles, true) && $school->type !== 'secondary', 403);
             $scope[(int) $school->id] = $roles;
+            $permissions[(int) $school->id] = array_values(array_unique($grant['permissions'] ?? []));
             if (isset($grant['class_ids'])) {
-                abort_unless($roles === ['attendance_viewer'], 403);
+                abort_unless($roles === ['attendance_viewer'] && $permissions[(int) $school->id] === [], 403);
                 $classIds = DB::table('ec_integration_mappings as cm')->join('ec_classes as c', 'c.id', '=', 'cm.local_id')
                     ->where('cm.connection_id', $connection->id)->where('cm.local_type', 'class')->where('cm.external_type', 'class')
                     ->whereIn('cm.external_id', array_map('strval', $grant['class_ids']))->where('c.school_id', $school->id)->where('c.tenant_id', $connection->tenant_id)->whereNull('c.deleted_at')->pluck('c.id');
@@ -78,12 +83,32 @@ final class GateSourceWorkspaceController extends Controller
         $selected = $maps->where('external_id', (string) $input['school_id']);
         abort_unless($selected->count() === 1 && isset($scope[(int) $selected->sole()->id]), 404);
         $schoolId = (int) $selected->sole()->id;
-        $actor = $this->principal($bridge, $input['actor'], $scope, (int) $connection->tenant_id);
+        $actor = $this->principal($bridge, $input['actor'], $scope, (int) $connection->tenant_id, $permissions);
         $context = new SourceWorkspaceContext;
         $context->actorId = (int) $actor->id;
         $context->studentsBySchool = $classScopes;
+        $context->permissionsBySchool = $permissions;
         app()->instance(SourceWorkspaceContext::class, $context);
         try {
+            if (in_array($input['operation'], ['setup', 'save_setup', 'activate', 'pause'], true)) {
+                abort_unless($context->allows($actor, $schoolId, 'configure'), 403);
+                if (in_array($input['operation'], ['activate', 'pause'], true)) abort_unless($context->allows($actor, $schoolId, 'activate'), 403);
+                $inner = Request::create('/internal-gate-setup', 'POST', [], [], [],
+                    ['HTTP_ACCEPT' => 'application/json', 'CONTENT_TYPE' => 'application/json'], json_encode($input['setup_body'] ?? [], JSON_THROW_ON_ERROR));
+                $inner->setUserResolver(fn () => $actor);
+                $controller = app(GateSetupController::class);
+                if ($input['operation'] === 'setup') {
+                    $data = app(\App\Services\Biometrics\Gate\SetupDrafts::class)->read($actor, $schoolId);
+                    // Do not expose separate application URLs, source endpoints or paginated student records.
+                    unset($data['students'], $data['selectedStudents'], $data['connection']);
+                    return response()->json(['data' => $data])->header('Cache-Control', 'private, no-store');
+                }
+                return match ($input['operation']) {
+                    'save_setup' => $controller->store($inner, $schoolId),
+                    'activate' => $controller->activate($inner, $schoolId),
+                    'pause' => $controller->pause($inner, $schoolId, $input['publication_id'] ?? 0),
+                };
+            }
             if ($input['operation'] === 'status') {
                 return response()->json(['data' => $this->status($connection, $schoolId, $input['day'])])->header('Cache-Control', 'private, no-store');
             }
@@ -120,9 +145,9 @@ final class GateSourceWorkspaceController extends Controller
         }
     }
 
-    private function principal(object $bridge, array $actor, array $scope, int $tenant): AdminUser
+    private function principal(object $bridge, array $actor, array $scope, int $tenant, array $permissions): AdminUser
     {
-        return DB::transaction(function () use ($bridge, $actor, $scope, $tenant): AdminUser {
+        return DB::transaction(function () use ($bridge, $actor, $scope, $tenant, $permissions): AdminUser {
             // Serialise creation/refresh of this bridge's identities. Never adopt an existing email account.
             DB::table('ec_gate_staff_bridges')->where('id', $bridge->id)->lockForUpdate()->sole();
             $binding = DB::table('ec_gate_source_actors')->where('bridge_id', $bridge->id)->where('source_user_id', $actor['id'])->first();
@@ -140,6 +165,14 @@ final class GateSourceWorkspaceController extends Controller
                 DB::table('ec_gate_source_actors')->insert(['bridge_id' => $bridge->id, 'source_user_id' => $actor['id'], 'admin_id' => $user->id, 'authority_until' => now()->utc()->addSeconds(60)]);
             }
             DB::table('ec_gate_operator_assignments')->where('admin_id', $user->id)->update(['active' => false]);
+            foreach (['ec_gate_setup_assignments', 'ec_gate_activation_assignments'] as $table) {
+                DB::table($table)->where('admin_id', $user->id)->update(['active' => false]);
+                $permission = $table === 'ec_gate_setup_assignments' ? 'configure' : 'activate';
+                foreach ($permissions as $school => $grants) {
+                    if (in_array($permission, $grants, true)) DB::table($table)->updateOrInsert(
+                        ['admin_id' => $user->id, 'tenant_id' => $tenant, 'school_id' => $school], ['active' => true]);
+                }
+            }
             foreach ($scope as $school => $roles) {
                 foreach ($roles as $role) {
                     DB::table('ec_gate_operator_assignments')->updateOrInsert(['admin_id' => $user->id, 'tenant_id' => $tenant, 'school_id' => $school, 'role' => $role], ['active' => true]);
