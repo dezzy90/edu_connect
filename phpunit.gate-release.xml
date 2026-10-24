@@ -7,7 +7,7 @@
     <env name="DB_CONNECTION" value="sqlite" force="true"/><env name="DB_DATABASE" value=":memory:" force="true"/>
     <env name="CACHE_STORE" value="array" force="true"/><env name="QUEUE_CONNECTION" value="sync" force="true"/>
     <env name="SESSION_DRIVER" value="array" force="true"/><env name="MAIL_MAILER" value="array" force="true"/>
-    <env name="BROADCAST_CONNECTION" value="log" force="true"/><env name="HIKVISION_PUSH_ENABLED" value="false" force="true"/>
+    <env name="PUSH_DISPATCH_MODE" value="disabled" force="true"/><env name="BROADCAST_CONNECTION" value="log" force="true"/><env name="HIKVISION_PUSH_ENABLED" value="false" force="true"/>
     <env name="APP_CONFIG_CACHE" value="tmp/no-cached-gate-config.php" force="true"/>
   </php>
 </phpunit>

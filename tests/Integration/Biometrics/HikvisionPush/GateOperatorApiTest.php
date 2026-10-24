@@ -205,7 +205,7 @@ it('delivers an operator correction through the dedicated mirror and private par
     $notices = DB::table('ec_mobile_notifications')->get();
     expect($notices)->toHaveCount(2);
     expect(json_encode($notices))->not->toContain('DO-NOT-SHARE-OPERATOR-NOTE', 'actor_id', 'reason_code');
-    expect($notices->last()->title)->toBe('School gate record corrected');
+    expect($notices->last()->title)->toBe('Attendance record updated');
     expect(DB::table('ec_attendance_events')->count())->toBe(0);
     expect(DB::table('ec_notification_deliveries')->count())->toBe(0);
 });
