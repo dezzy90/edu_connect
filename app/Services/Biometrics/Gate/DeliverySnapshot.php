@@ -16,6 +16,13 @@ final class DeliverySnapshot
         if ($previous) {
             return $previous->delivery_snapshot ? json_decode($previous->delivery_snapshot, true, 16, JSON_THROW_ON_ERROR) : null;
         }
+
+        return self::currentMirror($event);
+    }
+
+    /** Only explicit operator recovery may approve a destination for a previously held intent. */
+    public static function currentMirror(array $event): ?array
+    {
         $binding = DB::table('ec_gate_mirror_bindings')->where('tenant_id', $event['tenant_id'])->where('school_id', $event['school_id'])
             ->where('enabled', true)->first();
         if (! $binding || DB::table('ec_gate_mirror_bindings')->where('source_id', $binding->source_id)
