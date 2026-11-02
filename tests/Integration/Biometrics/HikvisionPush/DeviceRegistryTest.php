@@ -629,7 +629,7 @@ it('rehearses three-school enrollment signed delivery parent isolation and scope
         $notice = DB::table('ec_mobile_notifications')->where('parent_account_id', $parents[$i]->id)->sole();
         expect((int) $notice->school_id)->toBe($school->id);
         expect((int) json_decode($notice->data, true)['student_id'])->toBe($shared['students'][$i]->id);
-        Sanctum::actingAs($parents[$i]);
+        Sanctum::actingAs($parents[$i], ['mobile:parent']);
         $history = $this->getJson('/api/mobile/v2/children/'.$shared['students'][$i]->id.'/gate-history')->assertOk()
             ->assertJsonCount(1, 'data.data')->assertJsonPath('data.data.0.event.movement', 'check_in')
             ->assertJsonMissingPath('data.data.0.event.device_uid')->assertJsonMissingPath('data.data.0.event.actor_id');
