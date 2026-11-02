@@ -21,7 +21,7 @@ afterEach(fn () => Carbon::setTestNow());
 it('exposes the current gate history only through the active school-scoped parent link', function (): void {
     GateFixture::scan($this->gate, 1, '07:30:00');
     app(DayProjector::class)->work();
-    Sanctum::actingAs($this->parent);
+    Sanctum::actingAs($this->parent, ['mobile:parent']);
     $this->getJson('/api/mobile/v2/children/'.$this->gate['student']->id.'/gate-history')->assertOk()
         ->assertJsonPath('data.data.0.event.movement', 'check_in')->assertJsonMissingPath('data.data.0.event.actor_id')
         ->assertJsonMissingPath('data.data.0.event.device_uid')->assertHeader('Cache-Control', 'no-store, private');
@@ -36,7 +36,7 @@ it('refuses strangers revoked links changed school scope and hidden students', f
         ])->id]),
         'hidden' => $this->gate['student']->update(['mobile_visible' => false]),
     };
-    Sanctum::actingAs($this->parent);
+    Sanctum::actingAs($this->parent, ['mobile:parent']);
     $this->getJson('/api/mobile/v2/children/'.$this->gate['student']->id.'/gate-history')->assertNotFound();
 })->with(['stranger', 'revoked', 'school', 'hidden']);
 
@@ -45,7 +45,7 @@ it('preserves withdrawn corrections in parent history without exposing operator 
     app(DayProjector::class)->work();
     DB::table('ec_hikvision_observations')->where('id', $id)->update(['status' => 'held_content_conflict']);
     app(DayProjector::class)->work();
-    Sanctum::actingAs($this->parent);
+    Sanctum::actingAs($this->parent, ['mobile:parent']);
     $this->getJson('/api/mobile/v2/children/'.$this->gate['student']->id.'/gate-history')->assertOk()
         ->assertJsonPath('data.data.0.revision', 2)->assertJsonPath('data.data.0.event.state', 'withdrawn')
         ->assertJsonPath('data.data.0.recorded_day_state', 'unknown')->assertJsonMissingPath('data.data.0.event.reason_code');

@@ -14,6 +14,14 @@ return [
     |
     */
 
+    'scmc' => [
+        'enabled' => (bool) env('SCMC_OTP_ENABLED', false),
+        'api_key' => env('SCMC_API_KEY'),
+        'otp_template_id' => env('SCMC_OTP_TEMPLATE_ID', 'b045f9d9-ba98-4ba1-9884-faab98aa169c'),
+        'app_name' => env('SCMC_APP_NAME', 'EduConnect'),
+        'timeout_seconds' => (int) env('SCMC_TIMEOUT_SECONDS', 15),
+    ],
+
     'postmark' => [
         'token' => env('POSTMARK_TOKEN'),
     ],

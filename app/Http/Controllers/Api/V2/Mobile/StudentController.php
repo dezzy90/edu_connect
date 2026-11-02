@@ -107,6 +107,7 @@ class StudentController extends Controller
         $sourceLink = $this->bestLinkCandidateForParent($availableMatches, $parent);
 
         $link = DB::transaction(function () use ($parent, $sourceLink): ParentStudentLink {
+            app(\App\Services\Auth\ReviewerDemoAccess::class)->assertStudent($parent, $sourceLink->student);
             $existingLink = ParentStudentLink::query()
                 ->where('student_id', $sourceLink->student_id)
                 ->where('parent_account_id', $parent->id)
