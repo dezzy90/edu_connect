@@ -54,21 +54,24 @@ class EduAdminProvisioningService
                 $tenant->restore();
             }
 
-            $connection = IntegrationConnection::query()->firstOrNew([
+            $connection = IntegrationConnection::query()->lockForUpdate()->firstOrNew([
                 'tenant_id' => $tenant->id,
                 'provider' => 'edu_admin',
             ]);
+
+            $prepared = isset($tenant->settings['gate_preparation_request_id']);
+            $localSchoolIds = $prepared ? $this->preparedGateSchoolIds($connection, $schoolIds, $baseUrl) : $schoolIds;
 
             $connection->forceFill([
                 'mode' => 'connected',
                 'base_url' => $baseUrl,
                 'api_version' => 'v1',
                 'remote_tenant_id' => (string) $complex['id'],
-                'enabled_school_ids' => $schoolIds,
+                'enabled_school_ids' => $localSchoolIds,
                 'provisioning_request_id' => $payload['request_id'],
                 'status' => 'active',
-                'scopes' => array_values(array_unique($payload['scopes'])),
-                'feature_flags' => config('integrations.feature_defaults.connected', []),
+                'scopes' => $prepared ? $connection->scopes : array_values(array_unique($payload['scopes'])),
+                'feature_flags' => $prepared ? $connection->feature_flags : config('integrations.feature_defaults.connected', []),
                 'encrypted_access_token' => Crypt::encryptString($payload['access_token']),
                 'webhook_secret' => Crypt::encryptString($payload['webhook_secret']),
                 'last_error' => null,
@@ -117,7 +120,7 @@ class EduAdminProvisioningService
         $schoolIds = School::withTrashed()
             ->where('tenant_id', $connection->tenant_id)
             ->where('source_system', 'edu_admin')
-            ->whereNotIn('source_id', $enabled)
+            ->whereNotIn(($connection->feature_flags['gate_only_sync'] ?? false) === true ? 'id' : 'source_id', $enabled)
             ->pluck('id');
 
         if ($schoolIds->isEmpty()) {
@@ -132,6 +135,37 @@ class EduAdminProvisioningService
         School::query()
             ->whereIn('id', $schoolIds)
             ->update(['status' => 'inactive']);
+    }
+
+    /** Prepared gate permissions use local IDs; reconnect payloads contain source IDs. */
+    private function preparedGateSchoolIds(IntegrationConnection $connection, array $sourceIds, string $baseUrl): array
+    {
+        if (! $connection->exists || $connection->base_url !== $baseUrl
+            || ($connection->feature_flags['gate_only_sync'] ?? false) !== true) {
+            throw new RuntimeException('The prepared gate connection requires an explicit scope review before reconnecting.');
+        }
+        $rows = DB::table('ec_gate_mirror_bindings as b')
+            ->join('ec_integration_mappings as m', fn ($q) => $q->on('m.connection_id', '=', 'b.connection_id')
+                ->on('m.local_id', '=', 'b.school_id')->where('m.local_type', 'school')->where('m.external_type', 'school'))
+            ->join('ec_schools as s', 's.id', '=', 'b.school_id')
+            ->where('b.connection_id', $connection->id)->where('b.tenant_id', $connection->tenant_id)
+            ->where('s.tenant_id', $connection->tenant_id)->where('s.status', 'active')->whereNull('s.deleted_at')
+            ->where('s.source_system', 'edu_admin')->whereColumn('s.source_id', 'm.external_id')
+            ->get(['b.school_id', 'b.remote_school_id', 'm.external_id']);
+        $remote = []; $local = [];
+        foreach ($rows as $row) {
+            if (! preg_match('/^[1-9]\d{0,17}$/D', $row->external_id) || (int) $row->external_id !== (int) $row->remote_school_id) {
+                throw new RuntimeException('The prepared gate school identity changed; review it explicitly.');
+            }
+            $remote[] = (int) $row->external_id;
+            $local[] = (int) $row->school_id;
+        }
+        sort($remote); sort($local);
+        if ($remote !== $sourceIds || count($local) !== count(array_unique($local)) || $local === []) {
+            throw new RuntimeException('The prepared gate school membership changed; review it explicitly.');
+        }
+
+        return $local;
     }
 
     private function validatedBaseUrl(string $baseUrl): string

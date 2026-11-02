@@ -117,3 +117,44 @@ it('never silently reactivates revoked grants or overwrites a changed prepared c
         expect(DB::table('ec_gate_setup_assignments')->where('admin_id', $first['admin_id'])->where('active', true)->count())->toBe(0);
     }
 })->with(['grant', 'connection', 'credential', 'membership']);
+
+function gateReconnectPayload(object $test): array
+{
+    return ['request_id' => 'b8b1eae8-9b0f-4cf2-9f92-a48b4b5c1322', 'edu_admin_base_url' => $test->source['origin'],
+        'complex' => $test->source['complex'], 'school_ids' => array_column($test->source['schools'], 'id'),
+        'scopes' => ['unrelated:read'], 'access_token' => $test->source['access_token'], 'webhook_secret' => $test->source['webhook_secret']];
+}
+
+it('reconnects prepared schools with local permissions and preserves gate-only resources and existing school visibility', function (): void {
+    $prepared = prepareGateInstallation($this);
+    $connection = App\Models\V2\IntegrationConnection::findOrFail($prepared['connection_id']);
+    $flags = $connection->feature_flags + ['gate_only_sync' => true, 'gate_parent_links_enabled' => true];
+    $connection->update(['feature_flags' => $flags, 'status' => 'active']);
+    $scopes = $connection->scopes;
+    $reconnected = app(App\Services\Integration\EduAdminProvisioningService::class)->connect(gateReconnectPayload($this));
+    expect($reconnected->enabled_school_ids)->toBe(array_column($prepared['schools'], 'local_id'))
+        ->and($reconnected->feature_flags)->toBe($flags)->and($reconnected->scopes)->toBe($scopes);
+    app(App\Services\Integration\EduAdminProvisioningService::class)->deactivateSchoolsOutsideScope($reconnected);
+    expect(DB::table('ec_schools')->where('tenant_id', $prepared['tenant_id'])->where('status', 'active')->count())->toBe(2);
+    Queue::assertPushed(App\Jobs\V2\Integration\RunEduAdminInitialSyncJob::class, 1);
+    Http::assertNothingSent();
+});
+
+it('rejects reconnect scope drift before changing the prepared connection', function (string $change): void {
+    $prepared = prepareGateInstallation($this);
+    $connection = App\Models\V2\IntegrationConnection::findOrFail($prepared['connection_id']);
+    $connection->update(['feature_flags' => $connection->feature_flags + ['gate_only_sync' => true]]);
+    $payload = gateReconnectPayload($this);
+    match ($change) {
+        'removed' => array_pop($payload['school_ids']),
+        'added' => $payload['school_ids'][] = 9999,
+        'origin' => $payload['edu_admin_base_url'] = 'https://another-approved.test',
+        'mapping' => DB::table('ec_integration_mappings')->where('connection_id', $connection->id)->where('local_type', 'school')->limit(1)->update(['external_id' => '9999']),
+        'lost_profile' => $connection->update(['feature_flags' => []]),
+    };
+    config(['integrations.provisioning.edu_admin.allowed_base_urls' => ['https://source.test', 'https://another-approved.test']]);
+    $before = $connection->fresh()->getRawOriginal();
+    expect(fn () => app(App\Services\Integration\EduAdminProvisioningService::class)->connect($payload))->toThrow(RuntimeException::class);
+    expect($connection->fresh()->getRawOriginal())->toBe($before);
+    Queue::assertNothingPushed();
+})->with(['removed', 'added', 'origin', 'mapping', 'lost_profile']);
