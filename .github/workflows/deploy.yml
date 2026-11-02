@@ -38,11 +38,19 @@ jobs:
       - name: Checkout production release
         uses: actions/checkout@v4
 
+      - name: Use the production PHP version
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          extensions: mbstring, dom, fileinfo, gd, openssl, pdo_mysql, pdo_sqlite, sqlite3, zip
+          coverage: none
+
       - name: Verify PHP and Composer
         run: |
           php -v
           composer --version
-          php -r 'exit(version_compare(PHP_VERSION, "8.2.0", ">=") ? 0 : 1);'
+          php -r 'exit(PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION === 2 ? 0 : 1);'
 
       - name: Install backend dependencies
         env:
