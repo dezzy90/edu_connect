@@ -4,14 +4,58 @@ namespace App\Http\Controllers\Api\V2\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\V2\ParentAccount;
+use App\Services\Auth\MobileOtpAuth;
+use App\Services\Auth\MobileOtpPhone;
+use App\Services\Auth\ReviewerDemoAccess;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class AuthController extends Controller
 {
+    public function requestOtp(Request $request, MobileOtpAuth $otp): JsonResponse
+    {
+        return $this->otpResponse(function () use ($request, $otp): array {
+            $otp->ensureAvailable();
+            $validated = $request->validate(['phone' => ['required', 'string', 'max:64']]);
+
+            return $otp->request($validated['phone'], (string) $request->ip());
+        });
+    }
+
+    public function verifyOtp(Request $request, MobileOtpAuth $otp): JsonResponse
+    {
+        return $this->otpResponse(function () use ($request, $otp): array {
+            $otp->ensureAvailable();
+            $validated = $request->validate([
+                'challenge_id' => ['required', 'string', 'uuid'],
+                'code' => ['required', 'string', 'regex:/^[0-9]{6}$/D'],
+                'device_name' => ['nullable', 'string', 'max:120'],
+            ]);
+
+            return $otp->verify($validated['challenge_id'], $validated['code'], (string) $request->ip(),
+                fn (ParentAccount $parent) => $this->authPayload($parent, $validated['device_name'] ?? 'mobile-app'));
+        });
+    }
+
+    private function otpResponse(callable $work): JsonResponse
+    {
+        try {
+            return response()->json(['status' => 'success', 'data' => $work()]);
+        } catch (HttpResponseException|ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable) {
+            // Do not report exception arguments, request data or provider bodies from this flow.
+            return response()->json([
+                'status' => 'error', 'message' => 'Phone sign-in is temporarily unavailable.',
+            ], 503);
+        }
+    }
+
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -27,6 +71,7 @@ class AuthController extends Controller
         ]);
 
         $phone = $this->normalizePhone($validated['phone']);
+        abort_if(app(ReviewerDemoAccess::class)->reservedPhone(app(MobileOtpPhone::class)->normalize($phone) ?? $phone), 403);
         $email = isset($validated['email']) ? strtolower($validated['email']) : null;
 
         $existing = ParentAccount::query()
@@ -176,13 +221,13 @@ class AuthController extends Controller
 
     private function authPayload(ParentAccount $parent, string $deviceName): array
     {
-        $expiresAt = now()->addMinutes((int) config('educonnect.mobile.token_expiration_minutes', 43200));
-        $token = $parent->createToken($deviceName, ['mobile:parent'], $expiresAt);
+        app(ReviewerDemoAccess::class)->assertParent($parent);
+        $token = $parent->createToken($deviceName, ['mobile:parent']);
 
         return [
             'token_type' => 'Bearer',
             'access_token' => $token->plainTextToken,
-            'expires_at' => $expiresAt->toIso8601String(),
+            'expires_at' => null,
             'parent' => $this->parentPayload($parent),
         ];
     }

@@ -1,0 +1,20 @@
+name: Parent phone sign-in regressions
+on:
+  pull_request:
+    branches: [production]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  parent-sign-in:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, dom, fileinfo, pdo_sqlite, sqlite3, gd, openssl
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: cp .env.example .env.testing
+      - run: vendor/bin/pest --configuration=phpunit.gate-release.xml tests/Unit/V2/MobileOtpAuthTest.php tests/Unit/V2/MobileOtpMigrationTest.php tests/Unit/ScmcOtpSenderTest.php tests/Unit/V2/ReviewerDemoAuthTest.php --compact --fail-on-warning --fail-on-empty-test-suite

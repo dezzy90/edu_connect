@@ -30,6 +30,9 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
+        $middleware->trimStrings(except: [
+            fn ($request) => $request->is('api/mobile/v2/auth/otp/verify'),
+        ]);
 
         $middleware->web(append: [
             HandleAppearance::class,

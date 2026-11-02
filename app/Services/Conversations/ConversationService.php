@@ -38,6 +38,10 @@ class ConversationService
 
     public function scopeVisibleToParent(Builder $query, ParentAccount $parent): void
     {
+        app(\App\Services\Auth\ReviewerDemoAccess::class)->assertParent($parent);
+        if (app(\App\Services\Auth\ReviewerDemoAccess::class)->isDemo($parent)) {
+            $query->where('tenant_id', (int) config('reviewer_demo.tenant_id'));
+        }
         $context = $this->parentContext($parent);
 
         $query->where(function (Builder $visible) use ($context, $parent): void {
@@ -72,6 +76,7 @@ class ConversationService
 
     public function ensureParentCanAccessThread(ParentAccount $parent, ConversationThread $thread): void
     {
+        app(\App\Services\Auth\ReviewerDemoAccess::class)->assertThread($parent, $thread);
         $query = ConversationThread::query()->whereKey($thread->id);
         $this->scopeVisibleToParent($query, $parent);
 
@@ -145,6 +150,7 @@ class ConversationService
 
     public function ensureDefaultThreadsForLink(ParentStudentLink $link): Collection
     {
+        app(\App\Services\Auth\ReviewerDemoAccess::class)->assertLink($link);
         $link->loadMissing(['parentAccount', 'student.class', 'student.school']);
 
         if (! $link->parentAccount instanceof ParentAccount || ! $link->student instanceof Student) {
@@ -479,6 +485,7 @@ class ConversationService
 
     public function ensureParentParticipant(ConversationThread $thread, ParentAccount $parent): ConversationParticipant
     {
+        app(\App\Services\Auth\ReviewerDemoAccess::class)->assertThread($parent, $thread);
         return ConversationParticipant::query()->firstOrCreate(
             [
                 'thread_id' => $thread->id,
@@ -554,6 +561,7 @@ class ConversationService
 
     private function ensureParentCanAccessStudent(ParentAccount $parent, Student $student): void
     {
+        app(\App\Services\Auth\ReviewerDemoAccess::class)->assertStudent($parent, $student);
         $allowed = ParentStudentLink::query()
             ->where('parent_account_id', $parent->id)
             ->where('student_id', $student->id)

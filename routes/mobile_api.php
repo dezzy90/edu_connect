@@ -21,6 +21,8 @@ Route::prefix('mobile/v2')
         Route::get('/config', ConfigController::class)->name('config');
 
         Route::prefix('auth')->name('auth.')->group(function () {
+            Route::post('/otp/request', [AuthController::class, 'requestOtp'])->name('otp.request');
+            Route::post('/otp/verify', [AuthController::class, 'verifyOtp'])->name('otp.verify');
             Route::post('/register', [AuthController::class, 'register'])->name('register');
             Route::post('/login', [AuthController::class, 'login'])->name('login');
             Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->name('forgot-password');
