@@ -226,7 +226,7 @@ class StudentController extends Controller
             'status' => 'success',
             'data' => [
                 'student' => $this->studentPayload($student),
-                'recent_attendance' => AttendanceEvent::query()
+                'recent_attendance' => $this->gateAttendancePayload($student, ['limit' => 10]) ?? AttendanceEvent::query()
                     ->with('device')
                     ->where('student_id', $student->id)
                     ->latest('event_time')
@@ -272,6 +272,12 @@ class StudentController extends Controller
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
+        $gate = $this->gateAttendancePayload($student, $validated);
+        if ($gate !== null) {
+            return response()->json(['status' => 'success', 'data' => $gate])
+                ->header('Cache-Control', 'private, no-store');
+        }
+
         $query = AttendanceEvent::query()
             ->with('device')
             ->where('student_id', $student->id)
@@ -297,6 +303,37 @@ class StudentController extends Controller
                 ->map(fn (AttendanceEvent $event) => $this->attendancePayload($event))
                 ->values(),
         ]);
+    }
+
+    /** Read current gate projections without creating legacy attendance rows or duplicate alerts. */
+    private function gateAttendancePayload(Student $student, array $filters): ?\Illuminate\Support\Collection
+    {
+        if (config('gate.enabled') !== true || ! in_array((int) $student->school_id, config('gate.school_ids', []), true)) {
+            return null;
+        }
+        $query = DB::table('ec_gate_movements as m')->join('ec_gate_days as d', 'd.id', '=', 'm.day_id')
+            ->where('d.tenant_id', $student->tenant_id)->where('d.school_id', $student->school_id)
+            ->where('d.student_id', $student->id)->where('m.payload->state', 'active')
+            ->whereIn('m.movement', ['check_in', 'check_out']);
+        // The stored day is the school's local date, not the server's UTC date.
+        if (! empty($filters['date_from'])) $query->where('d.day', '>=', Carbon::parse($filters['date_from'])->format('Y-m-d'));
+        if (! empty($filters['date_to'])) $query->where('d.day', '<=', Carbon::parse($filters['date_to'])->format('Y-m-d'));
+        if (! empty($filters['event_type'])) $query->where('m.movement', $filters['event_type']);
+
+        return $query->orderByDesc('d.day')->orderByDesc('m.payload->occurred_at')->orderByDesc('m.event_id')
+            ->limit((int) ($filters['limit'] ?? 30))->get(['m.event_id', 'm.revision', 'm.payload'])
+            ->map(static function ($row): array {
+                $event = json_decode($row->payload, true, 16, JSON_THROW_ON_ERROR);
+
+                return [
+                    // Stable negative IDs keep these read-only projections distinct from legacy rows.
+                    'id' => -((int) hexdec(substr($row->event_id, 0, 12)) + 1),
+                    'event_type' => $event['movement'], 'event_time' => $event['occurred_at'],
+                    'verify_status' => 'recorded', 'device' => null, 'source' => 'gate',
+                    'gate_event_id' => $row->event_id, 'revision' => (int) $row->revision,
+                    'timezone' => $event['timezone'],
+                ];
+            });
     }
 
     private function parent(Request $request): ParentAccount
@@ -388,6 +425,8 @@ class StudentController extends Controller
 
         $allowed = $this->activeLinksForParent($parent)
             ->where('student_id', $student->id)
+            ->where('tenant_id', $student->tenant_id)
+            ->where('school_id', $student->school_id)
             ->exists();
 
         if (! $allowed) {
